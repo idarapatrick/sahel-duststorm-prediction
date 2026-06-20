@@ -1,0 +1,7 @@
+data/raw/
+data/processed/
+models/*.pt
+models/*.onnx
+*.tif
+*.npz
+*.h5
