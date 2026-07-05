@@ -1,0 +1,2712 @@
+{
+  "date": "2026-07-04",
+  "region": "sahel",
+  "cells": [
+    {
+      "lat": 10,
+      "lon": -16,
+      "probability": 0.012,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -14,
+      "probability": 0.057,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -13,
+      "probability": 0.027,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -12,
+      "probability": 0.028,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -11,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -10,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -9,
+      "probability": 0.044,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -8,
+      "probability": 0.127,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -7,
+      "probability": 0.114,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -6,
+      "probability": 0.168,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -5,
+      "probability": 0.11,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": -4,
+      "probability": 0.201,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": -3,
+      "probability": 0.312,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": -2,
+      "probability": 0.307,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": -1,
+      "probability": 0.335,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 0,
+      "probability": 0.431,
+      "severity": "high"
+    },
+    {
+      "lat": 10,
+      "lon": 1,
+      "probability": 0.366,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 2,
+      "probability": 0.472,
+      "severity": "high"
+    },
+    {
+      "lat": 10,
+      "lon": 3,
+      "probability": 0.494,
+      "severity": "high"
+    },
+    {
+      "lat": 10,
+      "lon": 4,
+      "probability": 0.54,
+      "severity": "high"
+    },
+    {
+      "lat": 10,
+      "lon": 5,
+      "probability": 0.462,
+      "severity": "high"
+    },
+    {
+      "lat": 10,
+      "lon": 6,
+      "probability": 0.426,
+      "severity": "high"
+    },
+    {
+      "lat": 10,
+      "lon": 7,
+      "probability": 0.305,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 8,
+      "probability": 0.293,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 9,
+      "probability": 0.204,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 10,
+      "probability": 0.143,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 11,
+      "probability": 0.108,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 12,
+      "probability": 0.183,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 13,
+      "probability": 0.182,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 14,
+      "probability": 0.19,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 15,
+      "probability": 0.144,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 16,
+      "probability": 0.261,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 17,
+      "probability": 0.25,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 18,
+      "probability": 0.256,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 19,
+      "probability": 0.261,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 20,
+      "probability": 0.208,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 21,
+      "probability": 0.18,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 22,
+      "probability": 0.181,
+      "severity": "low"
+    },
+    {
+      "lat": 10,
+      "lon": 23,
+      "probability": 0.208,
+      "severity": "moderate"
+    },
+    {
+      "lat": 10,
+      "lon": 24,
+      "probability": 0.076,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -16,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -14,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -13,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -12,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -11,
+      "probability": 0.006,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -10,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -9,
+      "probability": 0.039,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -8,
+      "probability": 0.043,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -7,
+      "probability": 0.21,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": -6,
+      "probability": 0.194,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -5,
+      "probability": 0.157,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": -4,
+      "probability": 0.325,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": -3,
+      "probability": 0.292,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": -2,
+      "probability": 0.291,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": -1,
+      "probability": 0.341,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 0,
+      "probability": 0.472,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 1,
+      "probability": 0.534,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 2,
+      "probability": 0.531,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 3,
+      "probability": 0.503,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 4,
+      "probability": 0.606,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 5,
+      "probability": 0.565,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 6,
+      "probability": 0.441,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 7,
+      "probability": 0.379,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 8,
+      "probability": 0.315,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 9,
+      "probability": 0.242,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 10,
+      "probability": 0.274,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 11,
+      "probability": 0.263,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 12,
+      "probability": 0.166,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": 13,
+      "probability": 0.178,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": 14,
+      "probability": 0.165,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": 15,
+      "probability": 0.267,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 16,
+      "probability": 0.251,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 17,
+      "probability": 0.391,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 18,
+      "probability": 0.371,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 19,
+      "probability": 0.441,
+      "severity": "high"
+    },
+    {
+      "lat": 11,
+      "lon": 20,
+      "probability": 0.337,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 21,
+      "probability": 0.288,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 22,
+      "probability": 0.236,
+      "severity": "moderate"
+    },
+    {
+      "lat": 11,
+      "lon": 23,
+      "probability": 0.187,
+      "severity": "low"
+    },
+    {
+      "lat": 11,
+      "lon": 24,
+      "probability": 0.227,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": -16,
+      "probability": 0.054,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -14,
+      "probability": 0.058,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -13,
+      "probability": 0.046,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -12,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -11,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -10,
+      "probability": 0.007,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -9,
+      "probability": 0.047,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -8,
+      "probability": 0.08,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": -7,
+      "probability": 0.212,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": -6,
+      "probability": 0.211,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": -5,
+      "probability": 0.211,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": -4,
+      "probability": 0.37,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": -3,
+      "probability": 0.357,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": -2,
+      "probability": 0.438,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": -1,
+      "probability": 0.47,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 0,
+      "probability": 0.468,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 1,
+      "probability": 0.487,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 2,
+      "probability": 0.647,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 3,
+      "probability": 0.538,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 4,
+      "probability": 0.661,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 5,
+      "probability": 0.495,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 6,
+      "probability": 0.508,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 7,
+      "probability": 0.474,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 8,
+      "probability": 0.452,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 9,
+      "probability": 0.34,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 10,
+      "probability": 0.284,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 11,
+      "probability": 0.284,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 12,
+      "probability": 0.152,
+      "severity": "low"
+    },
+    {
+      "lat": 12,
+      "lon": 13,
+      "probability": 0.26,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 14,
+      "probability": 0.316,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 15,
+      "probability": 0.342,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 16,
+      "probability": 0.406,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 17,
+      "probability": 0.384,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 18,
+      "probability": 0.438,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 19,
+      "probability": 0.47,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 20,
+      "probability": 0.452,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 21,
+      "probability": 0.388,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 22,
+      "probability": 0.411,
+      "severity": "high"
+    },
+    {
+      "lat": 12,
+      "lon": 23,
+      "probability": 0.366,
+      "severity": "moderate"
+    },
+    {
+      "lat": 12,
+      "lon": 24,
+      "probability": 0.251,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": -16,
+      "probability": 0.035,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -15,
+      "probability": 0.04,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -14,
+      "probability": 0.076,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -13,
+      "probability": 0.037,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -12,
+      "probability": 0.083,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -11,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -10,
+      "probability": 0.076,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -9,
+      "probability": 0.116,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -8,
+      "probability": 0.11,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -7,
+      "probability": 0.129,
+      "severity": "low"
+    },
+    {
+      "lat": 13,
+      "lon": -6,
+      "probability": 0.3,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": -5,
+      "probability": 0.329,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": -4,
+      "probability": 0.405,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": -3,
+      "probability": 0.359,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": -2,
+      "probability": 0.517,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": -1,
+      "probability": 0.449,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 0,
+      "probability": 0.545,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 1,
+      "probability": 0.529,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 2,
+      "probability": 0.656,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 3,
+      "probability": 0.545,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 4,
+      "probability": 0.583,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 5,
+      "probability": 0.54,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 6,
+      "probability": 0.513,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 7,
+      "probability": 0.474,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 8,
+      "probability": 0.372,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": 9,
+      "probability": 0.382,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": 10,
+      "probability": 0.272,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": 11,
+      "probability": 0.222,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": 12,
+      "probability": 0.291,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": 13,
+      "probability": 0.231,
+      "severity": "moderate"
+    },
+    {
+      "lat": 13,
+      "lon": 14,
+      "probability": 0.41,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 15,
+      "probability": 0.426,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 16,
+      "probability": 0.579,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 17,
+      "probability": 0.637,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 18,
+      "probability": 0.598,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 19,
+      "probability": 0.612,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 20,
+      "probability": 0.603,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 21,
+      "probability": 0.493,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 22,
+      "probability": 0.433,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 23,
+      "probability": 0.448,
+      "severity": "high"
+    },
+    {
+      "lat": 13,
+      "lon": 24,
+      "probability": 0.357,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": -16,
+      "probability": 0.017,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -15,
+      "probability": 0.078,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -14,
+      "probability": 0.044,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -13,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -12,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -11,
+      "probability": 0.088,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -10,
+      "probability": 0.035,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -9,
+      "probability": 0.126,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -8,
+      "probability": 0.144,
+      "severity": "low"
+    },
+    {
+      "lat": 14,
+      "lon": -7,
+      "probability": 0.3,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": -6,
+      "probability": 0.287,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": -5,
+      "probability": 0.283,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": -4,
+      "probability": 0.468,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": -3,
+      "probability": 0.508,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": -2,
+      "probability": 0.556,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": -1,
+      "probability": 0.535,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 0,
+      "probability": 0.535,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 1,
+      "probability": 0.608,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 2,
+      "probability": 0.54,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 3,
+      "probability": 0.539,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 4,
+      "probability": 0.646,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 5,
+      "probability": 0.489,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 6,
+      "probability": 0.462,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 7,
+      "probability": 0.476,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 8,
+      "probability": 0.392,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": 9,
+      "probability": 0.33,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": 10,
+      "probability": 0.206,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": 11,
+      "probability": 0.248,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": 12,
+      "probability": 0.228,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": 13,
+      "probability": 0.295,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": 14,
+      "probability": 0.377,
+      "severity": "moderate"
+    },
+    {
+      "lat": 14,
+      "lon": 15,
+      "probability": 0.512,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 16,
+      "probability": 0.687,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 17,
+      "probability": 0.774,
+      "severity": "severe"
+    },
+    {
+      "lat": 14,
+      "lon": 18,
+      "probability": 0.817,
+      "severity": "severe"
+    },
+    {
+      "lat": 14,
+      "lon": 19,
+      "probability": 0.838,
+      "severity": "severe"
+    },
+    {
+      "lat": 14,
+      "lon": 20,
+      "probability": 0.754,
+      "severity": "severe"
+    },
+    {
+      "lat": 14,
+      "lon": 21,
+      "probability": 0.724,
+      "severity": "severe"
+    },
+    {
+      "lat": 14,
+      "lon": 22,
+      "probability": 0.544,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 23,
+      "probability": 0.402,
+      "severity": "high"
+    },
+    {
+      "lat": 14,
+      "lon": 24,
+      "probability": 0.315,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": -16,
+      "probability": 0.003,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -14,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -13,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -12,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -11,
+      "probability": 0.109,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -10,
+      "probability": 0.141,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -9,
+      "probability": 0.129,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -8,
+      "probability": 0.232,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": -7,
+      "probability": 0.191,
+      "severity": "low"
+    },
+    {
+      "lat": 15,
+      "lon": -6,
+      "probability": 0.364,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": -5,
+      "probability": 0.328,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": -4,
+      "probability": 0.458,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": -3,
+      "probability": 0.489,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": -2,
+      "probability": 0.456,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": -1,
+      "probability": 0.498,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 0,
+      "probability": 0.501,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 1,
+      "probability": 0.589,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 2,
+      "probability": 0.524,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 3,
+      "probability": 0.541,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 4,
+      "probability": 0.529,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 5,
+      "probability": 0.435,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 6,
+      "probability": 0.414,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 7,
+      "probability": 0.463,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 8,
+      "probability": 0.266,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": 9,
+      "probability": 0.323,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": 10,
+      "probability": 0.328,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": 11,
+      "probability": 0.206,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": 12,
+      "probability": 0.291,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": 13,
+      "probability": 0.386,
+      "severity": "moderate"
+    },
+    {
+      "lat": 15,
+      "lon": 14,
+      "probability": 0.504,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 15,
+      "probability": 0.521,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 16,
+      "probability": 0.663,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 17,
+      "probability": 0.806,
+      "severity": "severe"
+    },
+    {
+      "lat": 15,
+      "lon": 18,
+      "probability": 0.892,
+      "severity": "severe"
+    },
+    {
+      "lat": 15,
+      "lon": 19,
+      "probability": 0.837,
+      "severity": "severe"
+    },
+    {
+      "lat": 15,
+      "lon": 20,
+      "probability": 0.895,
+      "severity": "severe"
+    },
+    {
+      "lat": 15,
+      "lon": 21,
+      "probability": 0.803,
+      "severity": "severe"
+    },
+    {
+      "lat": 15,
+      "lon": 22,
+      "probability": 0.587,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 23,
+      "probability": 0.525,
+      "severity": "high"
+    },
+    {
+      "lat": 15,
+      "lon": 24,
+      "probability": 0.42,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": -16,
+      "probability": 0.021,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -14,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -13,
+      "probability": 0.043,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -12,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -11,
+      "probability": 0.028,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -10,
+      "probability": 0.126,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -9,
+      "probability": 0.14,
+      "severity": "low"
+    },
+    {
+      "lat": 16,
+      "lon": -8,
+      "probability": 0.24,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": -7,
+      "probability": 0.276,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": -6,
+      "probability": 0.322,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": -5,
+      "probability": 0.369,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": -4,
+      "probability": 0.425,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": -3,
+      "probability": 0.405,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": -2,
+      "probability": 0.519,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": -1,
+      "probability": 0.514,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 0,
+      "probability": 0.498,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 1,
+      "probability": 0.459,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 2,
+      "probability": 0.553,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 3,
+      "probability": 0.482,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 4,
+      "probability": 0.493,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 5,
+      "probability": 0.425,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 6,
+      "probability": 0.366,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 7,
+      "probability": 0.289,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 8,
+      "probability": 0.219,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 9,
+      "probability": 0.327,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 10,
+      "probability": 0.314,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 11,
+      "probability": 0.32,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 12,
+      "probability": 0.34,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 13,
+      "probability": 0.367,
+      "severity": "moderate"
+    },
+    {
+      "lat": 16,
+      "lon": 14,
+      "probability": 0.517,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 15,
+      "probability": 0.601,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 16,
+      "probability": 0.737,
+      "severity": "severe"
+    },
+    {
+      "lat": 16,
+      "lon": 17,
+      "probability": 0.784,
+      "severity": "severe"
+    },
+    {
+      "lat": 16,
+      "lon": 18,
+      "probability": 0.962,
+      "severity": "severe"
+    },
+    {
+      "lat": 16,
+      "lon": 19,
+      "probability": 0.993,
+      "severity": "severe"
+    },
+    {
+      "lat": 16,
+      "lon": 20,
+      "probability": 0.945,
+      "severity": "severe"
+    },
+    {
+      "lat": 16,
+      "lon": 21,
+      "probability": 0.775,
+      "severity": "severe"
+    },
+    {
+      "lat": 16,
+      "lon": 22,
+      "probability": 0.729,
+      "severity": "severe"
+    },
+    {
+      "lat": 16,
+      "lon": 23,
+      "probability": 0.509,
+      "severity": "high"
+    },
+    {
+      "lat": 16,
+      "lon": 24,
+      "probability": 0.405,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": -16,
+      "probability": 0.064,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -14,
+      "probability": 0.048,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -13,
+      "probability": 0.059,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -12,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -11,
+      "probability": 0.1,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -10,
+      "probability": 0.064,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -9,
+      "probability": 0.187,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -8,
+      "probability": 0.143,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -7,
+      "probability": 0.187,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": -6,
+      "probability": 0.208,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": -5,
+      "probability": 0.35,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": -4,
+      "probability": 0.382,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": -3,
+      "probability": 0.368,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": -2,
+      "probability": 0.419,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": -1,
+      "probability": 0.382,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 0,
+      "probability": 0.436,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": 1,
+      "probability": 0.419,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": 2,
+      "probability": 0.355,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 3,
+      "probability": 0.454,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": 4,
+      "probability": 0.375,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 5,
+      "probability": 0.394,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 6,
+      "probability": 0.316,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 7,
+      "probability": 0.212,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 8,
+      "probability": 0.314,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 9,
+      "probability": 0.17,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": 10,
+      "probability": 0.176,
+      "severity": "low"
+    },
+    {
+      "lat": 17,
+      "lon": 11,
+      "probability": 0.228,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 12,
+      "probability": 0.277,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 13,
+      "probability": 0.331,
+      "severity": "moderate"
+    },
+    {
+      "lat": 17,
+      "lon": 14,
+      "probability": 0.552,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": 15,
+      "probability": 0.689,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": 16,
+      "probability": 0.733,
+      "severity": "severe"
+    },
+    {
+      "lat": 17,
+      "lon": 17,
+      "probability": 0.79,
+      "severity": "severe"
+    },
+    {
+      "lat": 17,
+      "lon": 18,
+      "probability": 0.985,
+      "severity": "severe"
+    },
+    {
+      "lat": 17,
+      "lon": 19,
+      "probability": 0.935,
+      "severity": "severe"
+    },
+    {
+      "lat": 17,
+      "lon": 20,
+      "probability": 0.954,
+      "severity": "severe"
+    },
+    {
+      "lat": 17,
+      "lon": 21,
+      "probability": 0.89,
+      "severity": "severe"
+    },
+    {
+      "lat": 17,
+      "lon": 22,
+      "probability": 0.703,
+      "severity": "severe"
+    },
+    {
+      "lat": 17,
+      "lon": 23,
+      "probability": 0.623,
+      "severity": "high"
+    },
+    {
+      "lat": 17,
+      "lon": 24,
+      "probability": 0.419,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": -16,
+      "probability": 0.029,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -14,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -13,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -12,
+      "probability": 0.072,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -11,
+      "probability": 0.029,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -10,
+      "probability": 0.131,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -9,
+      "probability": 0.179,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -8,
+      "probability": 0.134,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": -7,
+      "probability": 0.229,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": -6,
+      "probability": 0.225,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": -5,
+      "probability": 0.358,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": -4,
+      "probability": 0.381,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": -3,
+      "probability": 0.424,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": -2,
+      "probability": 0.357,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": -1,
+      "probability": 0.344,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 0,
+      "probability": 0.422,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": 1,
+      "probability": 0.386,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 2,
+      "probability": 0.394,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 3,
+      "probability": 0.275,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 4,
+      "probability": 0.303,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 5,
+      "probability": 0.329,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 6,
+      "probability": 0.241,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 7,
+      "probability": 0.278,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 8,
+      "probability": 0.22,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 9,
+      "probability": 0.111,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": 10,
+      "probability": 0.113,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": 11,
+      "probability": 0.282,
+      "severity": "moderate"
+    },
+    {
+      "lat": 18,
+      "lon": 12,
+      "probability": 0.199,
+      "severity": "low"
+    },
+    {
+      "lat": 18,
+      "lon": 13,
+      "probability": 0.406,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": 14,
+      "probability": 0.456,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": 15,
+      "probability": 0.627,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": 16,
+      "probability": 0.674,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": 17,
+      "probability": 0.883,
+      "severity": "severe"
+    },
+    {
+      "lat": 18,
+      "lon": 18,
+      "probability": 0.941,
+      "severity": "severe"
+    },
+    {
+      "lat": 18,
+      "lon": 19,
+      "probability": 0.877,
+      "severity": "severe"
+    },
+    {
+      "lat": 18,
+      "lon": 20,
+      "probability": 0.921,
+      "severity": "severe"
+    },
+    {
+      "lat": 18,
+      "lon": 21,
+      "probability": 0.737,
+      "severity": "severe"
+    },
+    {
+      "lat": 18,
+      "lon": 22,
+      "probability": 0.713,
+      "severity": "severe"
+    },
+    {
+      "lat": 18,
+      "lon": 23,
+      "probability": 0.503,
+      "severity": "high"
+    },
+    {
+      "lat": 18,
+      "lon": 24,
+      "probability": 0.434,
+      "severity": "high"
+    },
+    {
+      "lat": 19,
+      "lon": -16,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -15,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -14,
+      "probability": 0.041,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -13,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -12,
+      "probability": 0.031,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -11,
+      "probability": 0.109,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -10,
+      "probability": 0.05,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -9,
+      "probability": 0.024,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -8,
+      "probability": 0.081,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -7,
+      "probability": 0.19,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -6,
+      "probability": 0.132,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": -5,
+      "probability": 0.266,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": -4,
+      "probability": 0.342,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": -3,
+      "probability": 0.273,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": -2,
+      "probability": 0.335,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": -1,
+      "probability": 0.299,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 0,
+      "probability": 0.265,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 1,
+      "probability": 0.256,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 2,
+      "probability": 0.291,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 3,
+      "probability": 0.213,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 4,
+      "probability": 0.197,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": 5,
+      "probability": 0.221,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 6,
+      "probability": 0.184,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": 7,
+      "probability": 0.118,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": 8,
+      "probability": 0.116,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": 9,
+      "probability": 0.161,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": 10,
+      "probability": 0.135,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": 11,
+      "probability": 0.132,
+      "severity": "low"
+    },
+    {
+      "lat": 19,
+      "lon": 12,
+      "probability": 0.254,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 13,
+      "probability": 0.333,
+      "severity": "moderate"
+    },
+    {
+      "lat": 19,
+      "lon": 14,
+      "probability": 0.49,
+      "severity": "high"
+    },
+    {
+      "lat": 19,
+      "lon": 15,
+      "probability": 0.514,
+      "severity": "high"
+    },
+    {
+      "lat": 19,
+      "lon": 16,
+      "probability": 0.575,
+      "severity": "high"
+    },
+    {
+      "lat": 19,
+      "lon": 17,
+      "probability": 0.809,
+      "severity": "severe"
+    },
+    {
+      "lat": 19,
+      "lon": 18,
+      "probability": 0.816,
+      "severity": "severe"
+    },
+    {
+      "lat": 19,
+      "lon": 19,
+      "probability": 0.789,
+      "severity": "severe"
+    },
+    {
+      "lat": 19,
+      "lon": 20,
+      "probability": 0.812,
+      "severity": "severe"
+    },
+    {
+      "lat": 19,
+      "lon": 21,
+      "probability": 0.745,
+      "severity": "severe"
+    },
+    {
+      "lat": 19,
+      "lon": 22,
+      "probability": 0.603,
+      "severity": "high"
+    },
+    {
+      "lat": 19,
+      "lon": 23,
+      "probability": 0.546,
+      "severity": "high"
+    },
+    {
+      "lat": 19,
+      "lon": 24,
+      "probability": 0.394,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": -16,
+      "probability": 0,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -15,
+      "probability": 0.076,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -14,
+      "probability": 0.048,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -13,
+      "probability": 0.033,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -12,
+      "probability": 0.068,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -11,
+      "probability": 0.08,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -10,
+      "probability": 0.088,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -9,
+      "probability": 0.027,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -8,
+      "probability": 0.124,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -7,
+      "probability": 0.066,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": -6,
+      "probability": 0.222,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": -5,
+      "probability": 0.203,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": -4,
+      "probability": 0.235,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": -3,
+      "probability": 0.251,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": -2,
+      "probability": 0.292,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": -1,
+      "probability": 0.21,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": 0,
+      "probability": 0.29,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": 1,
+      "probability": 0.138,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 2,
+      "probability": 0.119,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 3,
+      "probability": 0.155,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 4,
+      "probability": 0.143,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 5,
+      "probability": 0.115,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 6,
+      "probability": 0.124,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 7,
+      "probability": 0.126,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 8,
+      "probability": 0.056,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 9,
+      "probability": 0.139,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 10,
+      "probability": 0.135,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 11,
+      "probability": 0.121,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 12,
+      "probability": 0.195,
+      "severity": "low"
+    },
+    {
+      "lat": 20,
+      "lon": 13,
+      "probability": 0.228,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": 14,
+      "probability": 0.347,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": 15,
+      "probability": 0.516,
+      "severity": "high"
+    },
+    {
+      "lat": 20,
+      "lon": 16,
+      "probability": 0.476,
+      "severity": "high"
+    },
+    {
+      "lat": 20,
+      "lon": 17,
+      "probability": 0.585,
+      "severity": "high"
+    },
+    {
+      "lat": 20,
+      "lon": 18,
+      "probability": 0.708,
+      "severity": "severe"
+    },
+    {
+      "lat": 20,
+      "lon": 19,
+      "probability": 0.676,
+      "severity": "high"
+    },
+    {
+      "lat": 20,
+      "lon": 20,
+      "probability": 0.651,
+      "severity": "high"
+    },
+    {
+      "lat": 20,
+      "lon": 21,
+      "probability": 0.577,
+      "severity": "high"
+    },
+    {
+      "lat": 20,
+      "lon": 22,
+      "probability": 0.52,
+      "severity": "high"
+    },
+    {
+      "lat": 20,
+      "lon": 23,
+      "probability": 0.387,
+      "severity": "moderate"
+    },
+    {
+      "lat": 20,
+      "lon": 24,
+      "probability": 0.36,
+      "severity": "moderate"
+    }
+  ]
+}
