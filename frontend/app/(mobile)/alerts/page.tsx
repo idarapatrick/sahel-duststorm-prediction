@@ -191,7 +191,7 @@ export default function AlertsPage() {
 
           {activeStatus === "loading" && <p className="text-xs text-sd-muted">Checking...</p>}
           {activeStatus === "error" && (
-            <p className="text-xs text-sd-muted">Couldn&apos;t reach the alert service.</p>
+            <p className="text-xs text-sd-muted">Forecasting services are currently down. Kindly check back in some minutes.</p>
           )}
           {activeStatus === "ready" && activeAlerts.length === 0 && (
             <p className="text-xs text-sd-muted">No active dust risks right now.</p>

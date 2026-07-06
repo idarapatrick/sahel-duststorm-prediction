@@ -3,10 +3,8 @@
 import { Area, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
 import { DustySky } from "@/components/layout/DustySky";
 import { LocationPill } from "@/components/forecast/LocationPill";
-import { useSelectedLocation } from "@/components/providers/LocationProvider";
 import { usePrediction } from "@/components/providers/PredictionProvider";
 import { ALERT_STATUS_LABEL } from "@/lib/riskStyles";
 import type { AlertLevel } from "@/lib/types";
@@ -30,8 +28,7 @@ function relativeDay(timestamp: string): string {
 }
 
 export default function TrackingPage() {
-  const { location } = useSelectedLocation();
-  const { progressive: data, switching, switchProgress, error, refresh } = usePrediction();
+  const { progressive: data, switchProgress, error, refresh } = usePrediction();
 
   const targetWeekday = data
     ? new Date(data.targetDate).toLocaleDateString(undefined, { weekday: "long" })
@@ -66,51 +63,36 @@ export default function TrackingPage() {
 
         {error && !data && (
           <Card className="items-center gap-1 p-5 text-center">
-            <p className="text-sm font-medium text-sd-strong">Couldn&apos;t reach the tracking service</p>
-            <p className="text-xs text-sd-muted">Make sure the backend is running, or try again shortly.</p>
+            <p className="text-sm font-medium text-sd-strong">Forecasting services are currently down</p>
+            <p className="text-xs text-sd-muted">Kindly check back in some minutes.</p>
           </Card>
         )}
 
-        {!data && !error && (
-          <>
-            <Card className="items-center gap-2 rounded-[26px] border-[rgba(255,255,255,.16)] p-[18px]">
-              <Skeleton className="h-3 w-16" />
-              <Skeleton className="h-9 w-32" />
-              <Skeleton className="h-4 w-40" />
-            </Card>
-            <Card className="gap-3.5 p-5">
-              <Skeleton className="h-3.5 w-24" />
-              <Skeleton className="h-2 w-full rounded-full" />
-              <Skeleton className="h-3 w-full" />
-            </Card>
-          </>
-        )}
-
-        {data && (
-          <>
-            <Card className="items-center gap-0 rounded-[26px] border-[rgba(255,255,255,.16)] p-[18px] text-center">
-              <p className="text-xs font-bold uppercase tracking-[0.02em] text-sd-label">Heads up</p>
-              {switching ? (
-                <div className="mt-2 flex w-full flex-col items-center gap-2 py-2">
-                  <Progress value={switchProgress} />
-                  <p className="text-xs font-semibold text-sd-muted">
-                    Updating forecast for {location.name}... {Math.round(switchProgress)}%
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <p
-                    className="mt-1.5 mb-0.5 text-[34px] font-extrabold leading-none"
-                    style={{ color: ALERT_HEX[data.alertLevel] }}
-                  >
-                    {ALERT_STATUS_LABEL[data.alertLevel]}
-                  </p>
-                  <p className="text-sm font-semibold text-sd-primary">
-                    {(data.probability * 100).toFixed(0)}% chance on {targetWeekday}
-                  </p>
-                </>
-              )}
-              {!switching && (data.trend === "increasing" || data.trend === "decreasing") && (
+        {!error && (
+          <Card className="items-center gap-0 rounded-[26px] border-[rgba(255,255,255,.16)] p-[18px] text-center">
+            <p className="text-xs font-bold uppercase tracking-[0.02em] text-sd-label">Heads up</p>
+            {data ? (
+              <>
+                <p
+                  className="mt-1.5 mb-0.5 text-[34px] font-extrabold leading-none"
+                  style={{ color: ALERT_HEX[data.alertLevel] }}
+                >
+                  {ALERT_STATUS_LABEL[data.alertLevel]}
+                </p>
+                <p className="text-sm font-semibold text-sd-primary">
+                  {(data.probability * 100).toFixed(0)}% chance on {targetWeekday}
+                </p>
+              </>
+            ) : (
+              <div className="mt-2 flex w-full flex-col items-center gap-2 py-2">
+                <p className="text-[34px] font-extrabold leading-none text-sd-faint">—</p>
+                <Progress value={switchProgress} />
+                <p className="text-xs font-semibold text-sd-muted">
+                  Checking conditions for this location... {Math.round(switchProgress)}%
+                </p>
+              </div>
+            )}
+            {data && (data.trend === "increasing" || data.trend === "decreasing") && (
                 <span
                   className="mt-3 inline-flex items-center gap-[6px] rounded-[14px] px-3 py-1.5"
                   style={{
@@ -131,8 +113,11 @@ export default function TrackingPage() {
                   </span>
                 </span>
               )}
-            </Card>
+          </Card>
+        )}
 
+        {data && (
+          <>
             <Card className="gap-3.5 p-5">
               <div className="flex items-center justify-between text-[13px]">
                 <span className="font-bold text-sd-primary">How sure we are</span>

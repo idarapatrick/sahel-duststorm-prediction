@@ -62,7 +62,9 @@ export default function NotificationsPage() {
         )}
 
         {status === "error" && (
-          <p className="sky-text text-xs text-sd-muted">Couldn&apos;t reach the alert service.</p>
+          <p className="sky-text text-xs text-sd-muted">
+            Forecasting services are currently down. Kindly check back in some minutes.
+          </p>
         )}
 
         {status === "ready" && entries && entries.length === 0 && (

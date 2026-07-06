@@ -20,7 +20,6 @@ import {
   Lightbulb,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { DustySky } from "@/components/layout/DustySky";
 import { LocationPill } from "@/components/forecast/LocationPill";
 import { RiskRing, PredictionProgressRing } from "@/components/forecast/RiskRing";
@@ -66,7 +65,7 @@ const TREND_COPY = {
 };
 
 export default function TodayPage() {
-  const { prediction, progressive, week, switching, switchProgress, error } = usePrediction();
+  const { prediction, progressive, week, switchProgress, error } = usePrediction();
 
   const today = new Date().toLocaleDateString(undefined, {
     weekday: "long",
@@ -104,48 +103,12 @@ export default function TodayPage() {
 
         {error && !prediction && (
           <Card className="items-center gap-1 p-5 text-center">
-            <p className="text-sm font-medium text-sd-strong">Couldn&apos;t reach the forecast service</p>
-            <p className="text-xs text-sd-muted">Make sure the backend is running, or try again shortly.</p>
+            <p className="text-sm font-medium text-sd-strong">Forecasting services are currently down</p>
+            <p className="text-xs text-sd-muted">Kindly check back in some minutes.</p>
           </Card>
         )}
 
-        {!prediction && !error && (
-          <>
-            <Card className="gap-4 rounded-[28px] border-[rgba(255,255,255,.16)] p-5">
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col gap-2">
-                  <Skeleton className="h-3 w-24" />
-                  <Skeleton className="h-9 w-28" />
-                </div>
-                <Skeleton className="size-[104px] rounded-full" />
-              </div>
-              <Skeleton className="h-4 w-full" />
-            </Card>
-            <div className="grid grid-cols-2 gap-3">
-              {[0, 1, 2, 3].map((i) => (
-                <Card key={i} className="items-center gap-2 rounded-[20px] p-4">
-                  <Skeleton className="size-5 rounded-full" />
-                  <Skeleton className="h-4 w-10" />
-                  <Skeleton className="h-2.5 w-14" />
-                </Card>
-              ))}
-            </div>
-            <Card className="gap-0 px-4 pb-3 pt-3.5">
-              <Skeleton className="mb-4 h-3.5 w-28" />
-              <div className="flex items-end justify-between">
-                {[24, 40, 52, 44, 30, 20].map((h, i) => (
-                  <div key={i} className="flex flex-col items-center gap-2">
-                    <Skeleton className="h-3 w-4" />
-                    <Skeleton className="w-[9px] rounded-[6px]" style={{ height: h }} />
-                    <Skeleton className="h-2.5 w-6" />
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </>
-        )}
-
-        {prediction && (
+        {!error && (
           <>
             <Card className="gap-0 rounded-[28px] border-[rgba(255,255,255,.16)] p-5 shadow-[0_14px_34px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.12)]">
               <div className="flex items-center justify-between">
@@ -155,33 +118,40 @@ export default function TodayPage() {
                   </p>
                   <p
                     className="mt-2 text-[38px] font-extrabold leading-[1.05]"
-                    style={{ color: RISK_HEX[prediction.risk] }}
+                    style={{ color: prediction ? RISK_HEX[prediction.risk] : "#DCE4EB" }}
                   >
-                    {RISK_LABEL[prediction.risk]}
+                    {prediction ? RISK_LABEL[prediction.risk] : "—"}
                   </p>
                 </div>
-                {switching ? (
-                  <PredictionProgressRing progress={switchProgress} size={104} valueSize={26} />
-                ) : (
+                {prediction ? (
                   <RiskRing probability={prediction.probability} risk={prediction.risk} size={104} valueSize={26} />
+                ) : (
+                  <PredictionProgressRing progress={switchProgress} size={104} valueSize={26} />
                 )}
               </div>
               <p className="mt-3.5 text-sm font-medium leading-[1.5] text-sd-primary">
-                {RISK_SUMMARY[prediction.risk]}
+                {prediction
+                  ? RISK_SUMMARY[prediction.risk]
+                  : "We're checking today's dust conditions for this location -- this can take a moment."}
               </p>
             </Card>
 
             <div className="grid grid-cols-2 gap-3">
               {(() => {
-                const stats = deriveStats(prediction.probability);
+                const stats = prediction ? deriveStats(prediction.probability) : null;
                 const soilMoisturePct = progressive
                   ? Math.round(progressive.surfaceData.soilMoisture * 100)
                   : null;
                 return (
                   <>
-                    <StatChip icon={Eye} value={`${stats.visibilityKm} km`} label="Visibility" />
-                    <StatChip icon={Wind} value={`${stats.windKmh} km/h`} label="Wind" />
-                    <StatChip icon={Sparkles} value={`${stats.airIndex}`} label="Air (dust)" iconColor="#F0883E" />
+                    <StatChip icon={Eye} value={stats ? `${stats.visibilityKm} km` : "—"} label="Visibility" />
+                    <StatChip icon={Wind} value={stats ? `${stats.windKmh} km/h` : "—"} label="Wind" />
+                    <StatChip
+                      icon={Sparkles}
+                      value={stats ? `${stats.airIndex}` : "—"}
+                      label="Air (dust)"
+                      iconColor="#F0883E"
+                    />
                     <StatChip
                       icon={Droplets}
                       value={soilMoisturePct !== null ? `${soilMoisturePct}%` : "—"}
@@ -192,7 +162,11 @@ export default function TodayPage() {
                 );
               })()}
             </div>
+          </>
+        )}
 
+        {prediction && (
+          <>
             {(() => {
               const hourly = deriveHourlyBreakdown(prediction.probability);
               const best = bestTimeOutside(hourly);
