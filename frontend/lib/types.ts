@@ -4,19 +4,14 @@ export type AlertLevel = "clear" | "watch" | "warning" | "alert";
 
 export type Trend = "new" | "increasing" | "decreasing" | "stable";
 
-// Mock regional grid used by the Home map overlay (a real per-cell grid would
-// mean hundreds of 10-30s backend calls -- see api.ts for details).
+// Used by components/map/ForecastMap.tsx (currently unused by any page --
+// kept for the "real map tile layer under the storm-spread overlay" upgrade
+// the design doc leaves as a future option).
 export interface GridPrediction {
   lat: number;
   lon: number;
   probability: number;
   severity: RiskLevel;
-}
-
-export interface ForecastResponse {
-  date: string;
-  region: string;
-  cells: GridPrediction[];
 }
 
 // GET /api/v1/predict/location
@@ -104,23 +99,6 @@ export interface ActiveAlertsResponse {
   totalTracked: number;
   activeAlerts: number;
   predictions: TrackedAlert[];
-}
-
-export interface Station {
-  id: string;
-  name: string;
-  lat: number;
-  lon: number;
-  instruments: string[];
-  latestAod: number;
-  lastUpdated: string;
-}
-
-export interface WindVector {
-  lat: number;
-  lon: number;
-  u10: number;
-  v10: number;
 }
 
 // Local-only prototype subscription (no backend endpoint yet -- see api.ts)

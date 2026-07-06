@@ -43,6 +43,12 @@
   --color-risk-moderate: var(--risk-moderate);
   --color-risk-high: var(--risk-high);
   --color-risk-severe: var(--risk-severe);
+  --color-sd-strong: var(--sd-text-strong);
+  --color-sd-primary: var(--sd-text-primary);
+  --color-sd-secondary: var(--sd-text-secondary);
+  --color-sd-muted: var(--sd-text-muted);
+  --color-sd-faint: var(--sd-text-faint);
+  --color-sd-label: var(--sd-label-cool);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -53,80 +59,94 @@
 }
 
 :root {
-  --background: #FAFAFA;
-  --foreground: #1D1D1F;
-  --card: color-mix(in oklab, #FFFFFF 80%, transparent);
-  --card-foreground: #1D1D1F;
-  --popover: #FFFFFF;
-  --popover-foreground: #1D1D1F;
-  --primary: #1A5FA0;
-  --primary-foreground: #FAFAFA;
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: #1D1D1F;
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: #86868B;
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: #1D1D1F;
-  --destructive: #B84020;
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --risk-low: #0C6E52;
-  --risk-moderate: #A06C10;
-  --risk-high: #D4760A;
-  --risk-severe: #B84020;
-  --radius: 0.75rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: #131a22;
+  --foreground: #FBFCFD;
+  --card: rgba(20, 26, 32, 0.62);
+  --card-foreground: #FBFCFD;
+  --popover: #212a32;
+  --popover-foreground: #FBFCFD;
+  --primary: #F0883E;
+  --primary-foreground: #20272e;
+  --secondary: rgba(20, 26, 32, 0.55);
+  --secondary-foreground: #FBFCFD;
+  --muted: rgba(20, 26, 32, 0.45);
+  --muted-foreground: #B9C4CE;
+  --accent: rgba(20, 26, 32, 0.55);
+  --accent-foreground: #FBFCFD;
+  --destructive: #E5533B;
+  --border: rgba(255, 255, 255, 0.18);
+  --input: rgba(240, 246, 250, 0.16);
+  --ring: #F2C14E;
+  --chart-1: #F0883E;
+  --chart-2: #F2C14E;
+  --chart-3: #6FCF97;
+  --chart-4: #E5533B;
+  --chart-5: #B9C4CE;
+  --risk-low: #6FCF97;
+  --risk-moderate: #F2C14E;
+  --risk-high: #F0883E;
+  --risk-severe: #E5533B;
+  --sd-text-strong: #FBFCFD;
+  --sd-text-primary: #EDEFF2;
+  --sd-text-secondary: #D3DAE0;
+  --sd-text-muted: #B9C4CE;
+  --sd-text-faint: #9AA7B2;
+  --sd-label-cool: #CBD5DE;
+  --accent-amber: #F2C14E;
+  --accent-orange: #F0883E;
+  --radius: 1rem;
+  --sidebar: rgba(20, 26, 32, 0.3);
+  --sidebar-foreground: #FBFCFD;
+  --sidebar-primary: #F0883E;
+  --sidebar-primary-foreground: #20272e;
+  --sidebar-accent: rgba(240, 246, 250, 0.1);
+  --sidebar-accent-foreground: #FBFCFD;
+  --sidebar-border: rgba(240, 246, 250, 0.14);
+  --sidebar-ring: #F2C14E;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: #4A8FD4;
-  --primary-foreground: oklch(0.145 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: #E0714F;
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --risk-low: #14A87C;
-  --risk-moderate: #C68A1D;
-  --risk-high: #E08A2E;
-  --risk-severe: #E0714F;
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #131a22;
+  --foreground: #FBFCFD;
+  --card: rgba(20, 26, 32, 0.62);
+  --card-foreground: #FBFCFD;
+  --popover: #212a32;
+  --popover-foreground: #FBFCFD;
+  --primary: #F0883E;
+  --primary-foreground: #20272e;
+  --secondary: rgba(20, 26, 32, 0.55);
+  --secondary-foreground: #FBFCFD;
+  --muted: rgba(20, 26, 32, 0.45);
+  --muted-foreground: #B9C4CE;
+  --accent: rgba(20, 26, 32, 0.55);
+  --accent-foreground: #FBFCFD;
+  --destructive: #E5533B;
+  --border: rgba(255, 255, 255, 0.18);
+  --input: rgba(240, 246, 250, 0.16);
+  --ring: #F2C14E;
+  --chart-1: #F0883E;
+  --chart-2: #F2C14E;
+  --chart-3: #6FCF97;
+  --chart-4: #E5533B;
+  --chart-5: #B9C4CE;
+  --risk-low: #6FCF97;
+  --risk-moderate: #F2C14E;
+  --risk-high: #F0883E;
+  --risk-severe: #E5533B;
+  --sd-text-strong: #FBFCFD;
+  --sd-text-primary: #EDEFF2;
+  --sd-text-secondary: #D3DAE0;
+  --sd-text-muted: #B9C4CE;
+  --sd-text-faint: #9AA7B2;
+  --sd-label-cool: #CBD5DE;
+  --sidebar: rgba(20, 26, 32, 0.3);
+  --sidebar-foreground: #FBFCFD;
+  --sidebar-primary: #F0883E;
+  --sidebar-primary-foreground: #20272e;
+  --sidebar-accent: rgba(240, 246, 250, 0.1);
+  --sidebar-accent-foreground: #FBFCFD;
+  --sidebar-border: rgba(240, 246, 250, 0.14);
+  --sidebar-ring: #F2C14E;
 }
 
 @layer base {
@@ -138,5 +158,23 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+@keyframes livepulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .4; transform: scale(.8); }
+}
+
+@layer utilities {
+  /* Guarantees legibility for text/icons sitting directly on the DustySky
+     image (not inside a glass card) -- the sky's brightness varies by
+     position (sun glow, blob highlights), so bare text needs its own
+     contrast rather than relying on the background staying dark. */
+  .sky-text {
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+  .sky-icon {
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
   }
 }

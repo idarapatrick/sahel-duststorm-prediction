@@ -1,135 +1,231 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Area, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { LocationSearch } from "@/components/forecast/LocationSearch";
-import { TrendIndicator } from "@/components/forecast/TrendIndicator";
-import { ALERT_BADGE_CLASS } from "@/lib/riskStyles";
-import { getProgressivePrediction } from "@/lib/api";
-import { KNOWN_LOCATIONS, type KnownLocation } from "@/lib/locations";
-import type { ProgressivePrediction } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DustySky } from "@/components/layout/DustySky";
+import { LocationPill } from "@/components/forecast/LocationPill";
+import { useSelectedLocation } from "@/components/providers/LocationProvider";
+import { usePrediction } from "@/components/providers/PredictionProvider";
+import { ALERT_STATUS_LABEL } from "@/lib/riskStyles";
+import type { AlertLevel } from "@/lib/types";
+import { RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 
-type Status = "loading" | "ready" | "error";
+const ALERT_HEX: Record<AlertLevel, string> = {
+  clear: "#6FCF97",
+  watch: "#F2C14E",
+  warning: "#F0883E",
+  alert: "#E5533B",
+};
 
-export default function ProgressiveTrackingPage() {
-  const [selected, setSelected] = useState<KnownLocation>(KNOWN_LOCATIONS[0]);
-  const [data, setData] = useState<ProgressivePrediction | null>(null);
-  const [status, setStatus] = useState<Status>("loading");
+function relativeDay(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffDays = Math.floor((now.setHours(0, 0, 0, 0) - date.setHours(0, 0, 0, 0)) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays > 1) return `${diffDays} days ago`;
+  return new Date(timestamp).toLocaleDateString(undefined, { weekday: "short" });
+}
 
-  function load() {
-    setStatus("loading");
-    getProgressivePrediction(selected.lat, selected.lon).then((result) => {
-      setData(result);
-      setStatus(result ? "ready" : "error");
-    });
-  }
+export default function TrackingPage() {
+  const { location } = useSelectedLocation();
+  const { progressive: data, switching, switchProgress, error, refresh } = usePrediction();
 
-  useEffect(load, [selected]);
+  const targetWeekday = data
+    ? new Date(data.targetDate).toLocaleDateString(undefined, { weekday: "long" })
+    : "";
+  const targetShort = data
+    ? new Date(data.targetDate).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+    : "";
+
+  const chartData = data?.history.map((u) => ({
+    label: relativeDay(u.timestamp),
+    chance: Math.round(u.probability * 100),
+  }));
 
   return (
-    <div className="flex flex-1 flex-col gap-6 px-5 pt-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Progressive Tracking</h1>
-        <p className="text-sm text-muted-foreground">
-          Predictions get more confident as real observations replace forecast data
-        </p>
-      </div>
-
-      <LocationSearch onSelect={setSelected} />
-
-      {status === "loading" && (
-        <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
-          <Loader2 className="size-6 animate-spin" />
-          <p className="text-xs">Fetching progressive prediction — this can take up to 30s</p>
-        </div>
-      )}
-
-      {status === "error" && (
-        <Card className="border-border/60 p-5 text-center">
-          <p className="text-sm font-medium">Couldn&apos;t reach the tracking service</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Make sure the backend is running, or try again shortly.
+    <DustySky glow="right">
+      <div className="flex flex-1 flex-col gap-4 px-[18px] pt-2">
+        <div className="sky-text">
+          <p className="text-2xl font-extrabold text-sd-strong">Tracking</p>
+          <p className="mt-[3px] text-[13px] font-medium text-sd-primary">
+            We keep checking. The closer the day, the surer we get.
           </p>
-        </Card>
-      )}
+        </div>
 
-      {status === "ready" && data && (
-        <>
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-sm text-muted-foreground">
-              {data.locationName} &middot; target {data.targetDate}
-            </p>
-            <div
-              className={cn(
-                "flex flex-col items-center gap-1 rounded-3xl border px-8 py-6 text-center",
-                ALERT_BADGE_CLASS[data.alertLevel]
+        <div className="sky-text flex items-center gap-2 text-[13px] font-semibold text-sd-secondary">
+          <LocationPill />
+          {data && (
+            <span>
+              watching for <span className="font-extrabold text-sd-strong">{targetShort}</span>
+            </span>
+          )}
+        </div>
+
+        {error && !data && (
+          <Card className="items-center gap-1 p-5 text-center">
+            <p className="text-sm font-medium text-sd-strong">Couldn&apos;t reach the tracking service</p>
+            <p className="text-xs text-sd-muted">Make sure the backend is running, or try again shortly.</p>
+          </Card>
+        )}
+
+        {!data && !error && (
+          <>
+            <Card className="items-center gap-2 rounded-[26px] border-[rgba(255,255,255,.16)] p-[18px]">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-9 w-32" />
+              <Skeleton className="h-4 w-40" />
+            </Card>
+            <Card className="gap-3.5 p-5">
+              <Skeleton className="h-3.5 w-24" />
+              <Skeleton className="h-2 w-full rounded-full" />
+              <Skeleton className="h-3 w-full" />
+            </Card>
+          </>
+        )}
+
+        {data && (
+          <>
+            <Card className="items-center gap-0 rounded-[26px] border-[rgba(255,255,255,.16)] p-[18px] text-center">
+              <p className="text-xs font-bold uppercase tracking-[0.02em] text-sd-label">Heads up</p>
+              {switching ? (
+                <div className="mt-2 flex w-full flex-col items-center gap-2 py-2">
+                  <Progress value={switchProgress} />
+                  <p className="text-xs font-semibold text-sd-muted">
+                    Updating forecast for {location.name}... {Math.round(switchProgress)}%
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p
+                    className="mt-1.5 mb-0.5 text-[34px] font-extrabold leading-none"
+                    style={{ color: ALERT_HEX[data.alertLevel] }}
+                  >
+                    {ALERT_STATUS_LABEL[data.alertLevel]}
+                  </p>
+                  <p className="text-sm font-semibold text-sd-primary">
+                    {(data.probability * 100).toFixed(0)}% chance on {targetWeekday}
+                  </p>
+                </>
               )}
-            >
-              <span className="text-2xl font-semibold">{data.alertLabel}</span>
-              <span className="font-mono text-sm text-muted-foreground">
-                {(data.probability * 100).toFixed(0)}% probability
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <TrendIndicator trend={data.trend} />
-              <span className="text-xs text-muted-foreground">
-                {data.hoursUntilEvent.toFixed(0)}h until target date
-              </span>
-            </div>
-          </div>
+              {!switching && (data.trend === "increasing" || data.trend === "decreasing") && (
+                <span
+                  className="mt-3 inline-flex items-center gap-[6px] rounded-[14px] px-3 py-1.5"
+                  style={{
+                    background:
+                      data.trend === "increasing" ? "rgba(229,83,59,.16)" : "rgba(111,207,151,.16)",
+                  }}
+                >
+                  {data.trend === "increasing" ? (
+                    <TrendingUp className="size-[15px]" style={{ color: "#E5533B" }} />
+                  ) : (
+                    <TrendingDown className="size-[15px]" style={{ color: "#6FCF97" }} />
+                  )}
+                  <span
+                    className="text-xs font-bold"
+                    style={{ color: data.trend === "increasing" ? "#F0A090" : "#9FE0BC" }}
+                  >
+                    {data.trend === "increasing" ? "Rising since yesterday" : "Falling since yesterday"}
+                  </span>
+                </span>
+              )}
+            </Card>
 
-          <Card className="border-border/60 bg-white/80 p-4">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">Confidence</span>
-              <span className="font-mono">{data.dataComposition.confidencePct}%</span>
-            </div>
-            <Progress value={data.dataComposition.confidencePct} className="mt-2" />
-            <p className="mt-2 text-xs text-muted-foreground">
-              {data.dataComposition.description}
-            </p>
-          </Card>
+            <Card className="gap-3.5 p-5">
+              <div className="flex items-center justify-between text-[13px]">
+                <span className="font-bold text-sd-primary">How sure we are</span>
+                <span className="text-[15px] font-extrabold" style={{ color: "#F2C14E" }}>
+                  {data.dataComposition.confidencePct}%
+                </span>
+              </div>
+              <Progress value={data.dataComposition.confidencePct} />
+              <p className="text-xs font-medium leading-[1.5] text-sd-secondary">
+                Confidence climbs as fresh readings replace early estimates. We&apos;ll keep updating
+                until {targetWeekday}.
+              </p>
+            </Card>
 
-          <Card className="border-border/60 bg-white/80 p-4">
-            <p className="text-sm font-medium">Alert message</p>
-            <p className="mt-1 text-sm text-muted-foreground">{data.alertMessage}</p>
-          </Card>
+            {chartData && chartData.length > 1 && (
+              <Card className="gap-3.5 p-5">
+                <p className="text-[13px] font-bold text-sd-primary">How the forecast changed</p>
+                <div className="h-[78px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="trackingArea" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stopColor="#F0883E" stopOpacity={0.42} />
+                          <stop offset="1" stopColor="#F0883E" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <YAxis hide domain={[0, 100]} />
+                      <Area
+                        type="monotone"
+                        dataKey="chance"
+                        stroke="none"
+                        fill="url(#trackingArea)"
+                        isAnimationActive={false}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="chance"
+                        stroke="#F0883E"
+                        strokeWidth={2.5}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                      <XAxis dataKey="label" hide />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex justify-between">
+                  {chartData.map((d, i) => (
+                    <span
+                      key={i}
+                      className="text-[10px] font-semibold"
+                      style={{ color: i === chartData.length - 1 ? "#F0C48A" : "#B9C4CE" }}
+                    >
+                      {d.label}
+                    </span>
+                  ))}
+                </div>
+              </Card>
+            )}
 
-          {data.history.length > 1 && (
-            <Card className="border-border/60 bg-white/80 p-4">
-              <p className="mb-3 text-sm font-medium">History ({data.history.length} updates)</p>
-              <div className="flex flex-col gap-2">
-                {[...data.history].reverse().map((update) => (
+            <Card className="gap-3 p-5">
+              <div className="flex items-center justify-between">
+                <p className="text-[13px] font-bold text-sd-primary">Recent updates</p>
+                <button onClick={refresh} aria-label="Refresh">
+                  <RefreshCw className="size-[15px] text-sd-muted" />
+                </button>
+              </div>
+              <div className="flex flex-col">
+                {[...data.history].reverse().map((update, i, arr) => (
                   <div
                     key={update.timestamp}
-                    className="flex items-center justify-between border-b border-border/40 pb-2 text-xs last:border-0 last:pb-0"
+                    className="flex items-center justify-between py-[9px]"
+                    style={i < arr.length - 1 ? { borderBottom: "1px solid rgba(255,255,255,.08)" } : undefined}
                   >
-                    <span className="text-muted-foreground">
-                      {new Date(update.timestamp).toLocaleString()}
+                    <span className="text-xs font-medium text-sd-secondary">
+                      {relativeDay(update.timestamp)}
                     </span>
-                    <Badge
-                      variant="outline"
-                      className={cn("capitalize", ALERT_BADGE_CLASS[update.alertLevel])}
+                    <span
+                      className="text-[11px] font-extrabold"
+                      style={{ color: ALERT_HEX[update.alertLevel] }}
                     >
-                      {update.alertLevel}
-                    </Badge>
-                    <span className="font-mono">{(update.probability * 100).toFixed(0)}%</span>
+                      {ALERT_STATUS_LABEL[update.alertLevel]}
+                    </span>
+                    <span className="text-xs font-extrabold text-sd-strong">
+                      {(update.probability * 100).toFixed(0)}%
+                    </span>
                   </div>
                 ))}
               </div>
             </Card>
-          )}
-
-          <Button variant="outline" className="gap-2" onClick={load}>
-            <RefreshCw className="size-4" />
-            Refresh prediction
-          </Button>
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </div>
+    </DustySky>
   );
 }

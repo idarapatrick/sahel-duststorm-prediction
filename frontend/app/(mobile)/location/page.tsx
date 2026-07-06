@@ -1,155 +1,122 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Navigation as Crosshair, MapPin, Sun, Cloud, Wind, Tornado } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { RiskIndicator } from "@/components/forecast/RiskIndicator";
-import { ForecastCard } from "@/components/forecast/ForecastCard";
+import { DustySky } from "@/components/layout/DustySky";
 import { LocationSearch } from "@/components/forecast/LocationSearch";
-import { RECOMMENDATIONS } from "@/lib/riskStyles";
-import { getLocationPrediction, getMultiDayForecast } from "@/lib/api";
-import { KNOWN_LOCATIONS, type KnownLocation } from "@/lib/locations";
-import type { LocationPrediction, MultiDayForecast } from "@/lib/types";
-import { Loader2, Share2 } from "lucide-react";
+import { StormSpreadMap } from "@/components/forecast/StormSpreadMap";
+import { useSelectedLocation } from "@/components/providers/LocationProvider";
+import { getMultiDayForecast } from "@/lib/api";
+import type { MultiDayForecast, RiskLevel } from "@/lib/types";
+import { RISK_LABEL } from "@/lib/riskStyles";
 
-type Status = "loading" | "ready" | "error";
+const RISK_HEX: Record<RiskLevel, string> = {
+  low: "#6FCF97",
+  moderate: "#F2C14E",
+  high: "#F0883E",
+  severe: "#E5533B",
+};
 
-export default function LocationPage() {
-  const [selected, setSelected] = useState<KnownLocation>(KNOWN_LOCATIONS[0]);
-  const [prediction, setPrediction] = useState<LocationPrediction | null>(null);
-  const [predictionStatus, setPredictionStatus] = useState<Status>("loading");
+const DAY_ICON: Record<RiskLevel, typeof Sun> = {
+  low: Sun,
+  moderate: Cloud,
+  high: Wind,
+  severe: Tornado,
+};
+
+const DAY_TINT: Record<RiskLevel, string> = {
+  low: "rgba(111,207,151,.16)",
+  moderate: "rgba(242,193,78,.16)",
+  high: "rgba(240,136,62,.16)",
+  severe: "rgba(229,83,59,.16)",
+};
+
+export default function MyAreaPage() {
+  const { location, setLocation } = useSelectedLocation();
   const [forecast, setForecast] = useState<MultiDayForecast | null>(null);
-  const [forecastStatus, setForecastStatus] = useState<Status>("loading");
-
-  // The 3-day forecast does 3x the work of a single prediction (~15-20s
-  // each), so it's fetched independently -- the risk indicator shouldn't
-  // wait on it.
-  useEffect(() => {
-    let cancelled = false;
-    setPredictionStatus("loading");
-    setPrediction(null);
-
-    getLocationPrediction(selected.lat, selected.lon).then((pred) => {
-      if (cancelled) return;
-      setPrediction(pred);
-      setPredictionStatus(pred ? "ready" : "error");
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selected]);
 
   useEffect(() => {
     let cancelled = false;
-    setForecastStatus("loading");
     setForecast(null);
-
-    getMultiDayForecast(selected.lat, selected.lon, 3).then((days) => {
-      if (cancelled) return;
-      setForecast(days);
-      setForecastStatus(days ? "ready" : "error");
+    getMultiDayForecast(location.lat, location.lon, 3).then((data) => {
+      if (!cancelled) setForecast(data);
     });
-
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [location]);
 
-  const shareText = prediction
-    ? `SahelDust: ${prediction.risk} dust risk forecast in ${prediction.locationName} (${(prediction.probability * 100).toFixed(0)}% probability, as of ${prediction.predictionDate}).`
-    : "";
-
-  function handleShare() {
-    if (navigator.share) {
-      navigator.share({ text: shareText }).catch(() => {});
-    } else {
-      window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank");
-    }
+  function useMyLocation() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      setLocation({
+        name: "My location",
+        country: "",
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+      });
+    });
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 px-5 pt-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">My Location</h1>
-        <p className="text-sm text-muted-foreground">Search a town or use your current area</p>
-      </div>
+    <DustySky glow="left">
+      <div className="flex flex-1 flex-col gap-4 px-[18px] pt-2">
+        <p className="sky-text text-2xl font-extrabold text-sd-strong">My area</p>
 
-      <LocationSearch onSelect={setSelected} />
+        <LocationSearch onSelect={setLocation} />
 
-      <div className="flex flex-col items-center gap-3">
-        <p className="text-sm text-muted-foreground">
-          {prediction?.locationName ?? `${selected.name}, ${selected.country}`}
-        </p>
-
-        {predictionStatus === "loading" && (
-          <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground">
-            <Loader2 className="size-6 animate-spin" />
-            <p className="text-xs">
-              Fetching live prediction — first call for a new location can take up to 30s
-            </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-[7px]">
+            <MapPin className="sky-icon size-4 text-[#F2C14E]" />
+            <span className="sky-text text-[15px] font-bold text-sd-strong">
+              {location.name}
+              {location.country ? `, ${location.country}` : ""}
+            </span>
           </div>
-        )}
-
-        {predictionStatus === "error" && (
-          <div className="flex flex-col items-center gap-1 rounded-2xl border border-border/60 px-6 py-5 text-center">
-            <p className="text-sm font-medium">Couldn&apos;t reach the live forecast service</p>
-            <p className="text-xs text-muted-foreground">
-              Make sure the backend is running, or try again shortly.
-            </p>
-          </div>
-        )}
-
-        {predictionStatus === "ready" && prediction && (
-          <>
-            <RiskIndicator risk={prediction.risk} probability={prediction.probability} />
-            <p className="text-xs text-muted-foreground">
-              As of {prediction.predictionDate} &middot; {prediction.dataSource}
-            </p>
-            {prediction.dustEvent && (
-              <p className="text-xs font-medium text-risk-severe">Dust event detected</p>
-            )}
-          </>
-        )}
-      </div>
-
-      {forecastStatus === "loading" && (
-        <div className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          Fetching 3-day forecast (this one takes a bit longer)...
+          <button
+            onClick={useMyLocation}
+            className="flex items-center gap-[6px] rounded-[14px] border px-[11px] py-[7px]"
+            style={{ background: "rgba(20,26,32,.58)", borderColor: "rgba(255,255,255,.13)" }}
+          >
+            <Crosshair className="size-[14px] text-sd-primary" />
+            <span className="text-[11px] font-bold text-sd-primary">Use my location</span>
+          </button>
         </div>
-      )}
 
-      {forecastStatus === "ready" && forecast && (
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {forecast.days.map((day, i) => (
-            <ForecastCard
-              key={day.date}
-              forecast={day}
-              label={i === 0 ? "Tomorrow" : `Day ${i + 1}`}
-            />
-          ))}
-        </div>
-      )}
-
-      {predictionStatus === "ready" && prediction && (
-        <Card className="border-border/60 bg-white/80 p-4">
-          <p className="text-sm font-medium">Recommended action</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {RECOMMENDATIONS[prediction.risk]}
-          </p>
+        <Card className="rounded-[24px] border-[rgba(255,255,255,.2)] p-5 shadow-[0_14px_34px_rgba(0,0,0,0.26)]">
+          <StormSpreadMap />
         </Card>
-      )}
 
-      <Button
-        variant="outline"
-        className="gap-2"
-        onClick={handleShare}
-        disabled={predictionStatus !== "ready"}
-      >
-        <Share2 className="size-4" />
-        Share forecast
-      </Button>
-    </div>
+        <p className="sky-text mt-0.5 text-[13px] font-bold text-sd-primary">Next 3 days</p>
+        <div className="flex gap-2.5">
+          {forecast ? (
+            forecast.days.map((day, i) => {
+              const Icon = DAY_ICON[day.risk];
+              const labels = ["Sat", "Sun", "Mon"];
+              return (
+                <Card key={day.date} className="flex-1 items-center gap-[7px] p-[14px_8px]">
+                  <span className="text-xs font-semibold text-sd-muted">{labels[i] ?? day.date}</span>
+                  <span
+                    className="flex size-[34px] items-center justify-center rounded-full"
+                    style={{ background: DAY_TINT[day.risk] }}
+                  >
+                    <Icon className="size-[17px]" style={{ color: RISK_HEX[day.risk] }} />
+                  </span>
+                  <span className="text-xs font-extrabold" style={{ color: RISK_HEX[day.risk] }}>
+                    {RISK_LABEL[day.risk]}
+                  </span>
+                  <span className="text-[15px] font-extrabold text-sd-strong">
+                    {(day.probability * 100).toFixed(0)}%
+                  </span>
+                </Card>
+              );
+            })
+          ) : (
+            <p className="text-xs text-sd-muted">Loading forecast...</p>
+          )}
+        </div>
+      </div>
+    </DustySky>
   );
 }

@@ -25,22 +25,26 @@ export function ForecastMap({
   cells,
   userPosition,
   onSelectCell,
+  center = [15, 5],
+  zoom = 5,
 }: {
   cells: GridPrediction[];
   userPosition?: { lat: number; lon: number } | null;
   onSelectCell?: (cell: GridPrediction) => void;
+  center?: [number, number];
+  zoom?: number;
 }) {
   return (
     <MapContainer
-      center={[15, 5]}
-      zoom={5}
+      center={center}
+      zoom={zoom}
       scrollWheelZoom={true}
       className="absolute inset-0"
       attributionControl={false}
     >
       <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution="&copy; OpenStreetMap contributors"
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        attribution="&copy; OpenStreetMap contributors &copy; CARTO"
       />
       {cells.map((cell) => (
         <Rectangle

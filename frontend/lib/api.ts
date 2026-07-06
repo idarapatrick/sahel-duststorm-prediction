@@ -1,20 +1,13 @@
 import type {
   ActiveAlertsResponse,
   AlertLevel,
-  ForecastResponse,
   LocationPrediction,
   MultiDayForecast,
   ProgressivePrediction,
   ProgressiveUpdate,
   RiskLevel,
-  Station,
   TrackedAlert,
-  WindVector,
 } from "./types";
-
-// Mock regional grid dates (Home map overlay only -- see note in getForecast).
-export const FORECAST_DATES = ["2026-07-02", "2026-07-03", "2026-07-04"] as const;
-export const FORECAST_DATE_LABELS = ["Today", "Tomorrow", "Day after"] as const;
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -29,32 +22,6 @@ export function isWithinSahelBounds(lat: number, lon: number): boolean {
     lon >= SAHEL_BOUNDS.lonMin &&
     lon <= SAHEL_BOUNDS.lonMax
   );
-}
-
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to load ${url}: ${res.status}`);
-  }
-  return res.json() as Promise<T>;
-}
-
-/**
- * A real per-cell grid would mean one 10-30s backend call per cell (hundreds
- * of them) -- infeasible live. The Home map overlay stays mock/illustrative;
- * Location and Progressive Tracking pages use the real single-point API
- * below instead.
- */
-export function getForecast(date: string): Promise<ForecastResponse> {
-  return getJson<ForecastResponse>(`/mock/forecast/${date}.json`);
-}
-
-export function getWind(date: string): Promise<{ date: string; vectors: WindVector[] }> {
-  return getJson<{ date: string; vectors: WindVector[] }>(`/mock/forecast/wind-${date}.json`);
-}
-
-export function getStations(): Promise<Station[]> {
-  return getJson<Station[]>("/mock/stations.json");
 }
 
 const RISK_LEVELS: readonly RiskLevel[] = ["low", "moderate", "high", "severe"];

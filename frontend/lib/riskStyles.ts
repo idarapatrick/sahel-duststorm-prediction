@@ -1,31 +1,33 @@
 import type { AlertLevel, RiskLevel } from "./types";
 
-export const RISK_BADGE_CLASS: Record<RiskLevel, string> = {
-  low: "bg-risk-low/10 text-risk-low border-risk-low/30",
-  moderate: "bg-risk-moderate/10 text-risk-moderate border-risk-moderate/30",
-  high: "bg-risk-high/10 text-risk-high border-risk-high/30",
-  severe: "bg-risk-severe/10 text-risk-severe border-risk-severe/30",
-};
-
+// Matches the mockup: the risk word stands alone ("Moderate"), no "Risk" suffix.
 export const RISK_LABEL: Record<RiskLevel, string> = {
-  low: "Low Risk",
-  moderate: "Moderate Risk",
-  high: "High Risk",
-  severe: "Severe Risk",
+  low: "Low",
+  moderate: "Moderate",
+  high: "High",
+  severe: "Severe",
 };
 
-export const RECOMMENDATIONS: Record<RiskLevel, string> = {
-  low: "Air quality is favourable. No special precautions needed.",
-  moderate: "Sensitive groups should limit prolonged outdoor activity and keep windows closed.",
-  high: "Limit outdoor activity, wear a mask outside, and keep windows closed.",
-  severe: "Stay indoors where possible, wear a mask outside, and keep children and the elderly sheltered.",
+export const RISK_SUMMARY: Record<RiskLevel, string> = {
+  low: "Air looks clear today. Great day to be outside.",
+  moderate: "Some dust likely by afternoon. Fine for most — take it easy if you have breathing trouble.",
+  high: "Dust likely for a good part of the day. Limit time outside if you can.",
+  severe: "Dust storm conditions expected. Stay indoors where possible.",
 };
 
-// Alert levels (progressive tracking / SMS) share the same 4-color scale as
-// risk levels, mapped clear->low, watch->moderate, warning->high, alert->severe.
-export const ALERT_BADGE_CLASS: Record<AlertLevel, string> = {
-  clear: "bg-risk-low/10 text-risk-low border-risk-low/30",
-  watch: "bg-risk-moderate/10 text-risk-moderate border-risk-moderate/30",
-  warning: "bg-risk-high/10 text-risk-high border-risk-high/30",
-  alert: "bg-risk-severe/10 text-risk-severe border-risk-severe/30",
+// Terse severity word -- used for badges and the alert-threshold picker.
+// Copy rule: never say "clear"/"warning"/"alert" (backend jargon) to users.
+export const ALERT_TERSE_LABEL: Record<AlertLevel, string> = {
+  clear: "Calm",
+  watch: "Watch",
+  warning: "High",
+  alert: "Severe",
+};
+
+// Narrative status word -- used for the Tracking hero and history rows.
+export const ALERT_STATUS_LABEL: Record<AlertLevel, string> = {
+  clear: "Calm",
+  watch: "Watch",
+  warning: "Dust likely",
+  alert: "Dust storm",
 };

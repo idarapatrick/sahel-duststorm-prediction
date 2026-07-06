@@ -1,28 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Cloud, Phone, ShieldCheck, Trash2, Wind } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { LocationSearch } from "@/components/forecast/LocationSearch";
-import { ALERT_BADGE_CLASS } from "@/lib/riskStyles";
+import { DustySky } from "@/components/layout/DustySky";
+import { LocationPill } from "@/components/forecast/LocationPill";
+import { useSelectedLocation } from "@/components/providers/LocationProvider";
 import { getActiveAlerts } from "@/lib/api";
-import { KNOWN_LOCATIONS, type KnownLocation } from "@/lib/locations";
+import { getLinkedPhone } from "@/lib/phoneLink";
+import { ALERT_TERSE_LABEL } from "@/lib/riskStyles";
 import type { AlertLevel, AlertSubscription, TrackedAlert } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const STORAGE_KEY = "saheldust:subscriptions";
 const THRESHOLDS: AlertLevel[] = ["watch", "warning", "alert"];
+
+const ALERT_HEX: Record<AlertLevel, string> = {
+  clear: "#6FCF97",
+  watch: "#F2C14E",
+  warning: "#F0883E",
+  alert: "#E5533B",
+};
+
+const ALERT_ICON = { clear: Cloud, watch: Cloud, warning: Wind, alert: Wind };
 
 function loadSubscriptions(): AlertSubscription[] {
   if (typeof window === "undefined") return [];
@@ -38,8 +40,8 @@ function saveSubscriptions(subs: AlertSubscription[]) {
 }
 
 export default function AlertsPage() {
-  const [location, setLocation] = useState<KnownLocation>(KNOWN_LOCATIONS[0]);
-  const [phone, setPhone] = useState("");
+  const { location } = useSelectedLocation();
+  const [linkedPhone, setLinkedPhone] = useState<string | null>(null);
   const [threshold, setThreshold] = useState<AlertLevel>("warning");
   const [subscriptions, setSubscriptions] = useState<AlertSubscription[]>([]);
 
@@ -48,6 +50,7 @@ export default function AlertsPage() {
 
   useEffect(() => {
     setSubscriptions(loadSubscriptions());
+    setLinkedPhone(getLinkedPhone());
     getActiveAlerts().then((data) => {
       setActive(data?.predictions ?? null);
       setActiveStatus(data ? "ready" : "error");
@@ -55,18 +58,14 @@ export default function AlertsPage() {
   }, []);
 
   function handleSubscribe() {
-    if (!phone.trim()) {
-      toast.error("Enter a phone number first");
-      return;
-    }
+    if (!linkedPhone) return;
     const next = [
       ...subscriptions,
-      { phone, lat: location.lat, lon: location.lon, locationName: location.name, threshold },
+      { phone: linkedPhone, lat: location.lat, lon: location.lon, locationName: location.name, threshold },
     ];
     setSubscriptions(next);
     saveSubscriptions(next);
-    setPhone("");
-    toast.success(`Saved alert preference for ${location.name}`);
+    toast.success(`Alerts on for ${location.name}`);
   }
 
   function handleRemove(index: number) {
@@ -75,102 +74,165 @@ export default function AlertsPage() {
     saveSubscriptions(next);
   }
 
+  const activeAlerts = active?.filter((a) => a.currentAlert.level !== "clear") ?? [];
+  const livePulse = activeAlerts.length > 0;
+
   return (
-    <div className="flex flex-1 flex-col gap-6 px-5 pt-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Alerts</h1>
-        <p className="text-sm text-muted-foreground">
-          Subscribe to alerts for a location and threshold
-        </p>
-      </div>
+    <DustySky glow="left">
+      <div className="flex flex-1 flex-col gap-4 px-[18px] pt-2">
+        <div className="sky-text">
+          <p className="text-2xl font-extrabold text-sd-strong">Alerts</p>
+          <p className="mt-[3px] text-[13px] font-medium text-sd-primary">
+            Get a heads-up before dust reaches you.
+          </p>
+        </div>
 
-      <Card className="flex flex-col gap-3 border-border/60 bg-white/80 p-4">
-        <LocationSearch onSelect={setLocation} placeholder="Choose a location..." />
-        <p className="text-xs text-muted-foreground">Selected: {location.name}, {location.country}</p>
-        <Input
-          type="tel"
-          placeholder="Phone number"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-        />
-        <Select value={threshold} onValueChange={(v) => setThreshold(v as AlertLevel)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Alert threshold" />
-          </SelectTrigger>
-          <SelectContent>
-            {THRESHOLDS.map((level) => (
-              <SelectItem key={level} value={level} className="capitalize">
-                {level}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button onClick={handleSubscribe}>Save preference</Button>
-        <p className="text-xs text-muted-foreground">
-          Saved on this device only for now. SMS delivery is coming in a later update.
-        </p>
-      </Card>
+        <Card
+          className="gap-4 rounded-[24px] border-[rgba(255,255,255,.2)] p-5 shadow-[0_14px_34px_rgba(0,0,0,0.24)]"
+        >
+          <LocationPill variant="field" />
 
-      {subscriptions.length > 0 && (
-        <Card className="border-border/60 bg-white/80 p-4">
-          <p className="mb-3 text-sm font-medium">Your preferences</p>
-          <div className="flex flex-col gap-2">
-            {subscriptions.map((sub, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <div>
-                  <p className="font-medium">{sub.locationName}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {sub.phone} &middot; threshold: {sub.threshold}
-                  </p>
-                </div>
-                <button onClick={() => handleRemove(i)} aria-label="Remove preference">
-                  <Trash2 className="size-4 text-muted-foreground hover:text-risk-severe" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      <div>
-        <p className="mb-3 text-sm font-medium">Active alerts (live)</p>
-
-        {activeStatus === "loading" && (
-          <div className="flex justify-center py-6 text-muted-foreground">
-            <Loader2 className="size-5 animate-spin" />
-          </div>
-        )}
-
-        {activeStatus === "error" && (
-          <p className="text-xs text-muted-foreground">Couldn&apos;t reach the alert service.</p>
-        )}
-
-        {activeStatus === "ready" && active && active.length === 0 && (
-          <p className="text-xs text-muted-foreground">No locations are currently being tracked.</p>
-        )}
-
-        {activeStatus === "ready" && active && active.length > 0 && (
-          <div className="flex flex-col gap-2">
-            {active.map((alert) => (
-              <Card
-                key={`${alert.lat}-${alert.lon}-${alert.targetDate}`}
-                className="flex items-center justify-between border-border/60 bg-white/80 p-3"
+          {linkedPhone ? (
+            <div
+              className="flex items-center justify-between gap-2 rounded-[14px] border px-[13px] py-3"
+              style={{ background: "rgba(12,16,20,.62)", borderColor: "rgba(255,255,255,.1)" }}
+            >
+              <span className="flex items-center gap-2 text-sm font-medium text-sd-primary">
+                <ShieldCheck className="size-4 shrink-0 text-[#6FCF97]" />
+                {linkedPhone}
+              </span>
+              <Link href="/link-phone?redirect=/alerts" className="shrink-0 text-xs font-bold text-[#F2C14E]">
+                Change
+              </Link>
+            </div>
+          ) : (
+            <div
+              className="flex items-center gap-[10px] rounded-[14px] border px-[13px] py-3"
+              style={{ background: "rgba(12,16,20,.62)", borderColor: "rgba(255,255,255,.1)" }}
+            >
+              <Phone className="size-4 shrink-0 text-sd-muted" />
+              <Link
+                href="/link-phone?redirect=/alerts"
+                className="flex-1 text-sm font-semibold text-[#F2C14E]"
               >
-                <div>
-                  <p className="text-sm font-medium">{alert.locationName}</p>
-                  <p className="text-xs text-muted-foreground">Target: {alert.targetDate}</p>
-                </div>
-                <Badge
-                  variant="outline"
-                  className={cn("capitalize", ALERT_BADGE_CLASS[alert.currentAlert.level])}
+                Link your phone number
+              </Link>
+            </div>
+          )}
+
+          <div>
+            <p className="mb-2 text-xs font-bold text-sd-label">Tell me when it reaches</p>
+            <div className="flex gap-2">
+              {THRESHOLDS.map((level) => (
+                <button
+                  key={level}
+                  onClick={() => setThreshold(level)}
+                  className="flex-1 rounded-xl py-[9px] text-xs font-bold transition-colors"
+                  style={
+                    threshold === level
+                      ? { color: "#20272e", background: "#F0883E", border: "1px solid #F0883E" }
+                      : {
+                          color: "#B9C4CE",
+                          background: "rgba(12,16,20,.58)",
+                          border: "1px solid rgba(255,255,255,.1)",
+                        }
+                  }
                 >
-                  {alert.currentAlert.level}
-                </Badge>
-              </Card>
-            ))}
+                  {ALERT_TERSE_LABEL[level]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={handleSubscribe}
+            disabled={!linkedPhone}
+            className="rounded-[14px] py-[13px] text-sm font-extrabold text-[#20272e] shadow-[0_8px_20px_rgba(240,136,62,0.3)] disabled:opacity-40"
+            style={{ background: "linear-gradient(90deg,#F2C14E,#F0883E)" }}
+          >
+            Turn on alerts
+          </button>
+          <p className="text-center text-[11px] font-medium leading-[1.5] text-sd-muted">
+            Saved on this phone. Free text-message alerts are coming soon.
+          </p>
+        </Card>
+
+        {subscriptions.length > 0 && (
+          <div className="mt-0.5">
+            <p className="mb-2 text-[13px] font-bold text-sd-primary">Your alerts</p>
+            <div className="flex flex-col gap-2">
+              {subscriptions.map((sub, i) => (
+                <Card key={i} className="flex-row items-center justify-between gap-3 rounded-[18px] p-[16px_18px]">
+                  <div>
+                    <p className="text-sm font-bold text-sd-strong">{sub.locationName}</p>
+                    <p className="mt-[2px] text-[11px] font-medium text-sd-muted">
+                      {sub.phone} &middot; at {ALERT_TERSE_LABEL[sub.threshold]}
+                    </p>
+                  </div>
+                  <button onClick={() => handleRemove(i)} aria-label="Remove alert">
+                    <Trash2 className="size-[17px] text-sd-faint" />
+                  </button>
+                </Card>
+              ))}
+            </div>
           </div>
         )}
+
+        <div className="mt-0.5">
+          <div className="mb-2 flex items-center gap-2">
+            <p className="text-[13px] font-bold text-sd-primary">Active now</p>
+            {livePulse && (
+              <span
+                className="size-[7px] rounded-full"
+                style={{ background: "#E5533B", animation: "livepulse 1.6s ease-in-out infinite" }}
+              />
+            )}
+          </div>
+
+          {activeStatus === "loading" && <p className="text-xs text-sd-muted">Checking...</p>}
+          {activeStatus === "error" && (
+            <p className="text-xs text-sd-muted">Couldn&apos;t reach the alert service.</p>
+          )}
+          {activeStatus === "ready" && activeAlerts.length === 0 && (
+            <p className="text-xs text-sd-muted">No active dust risks right now.</p>
+          )}
+
+          {activeStatus === "ready" && activeAlerts.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {activeAlerts.map((alert) => {
+                const Icon = ALERT_ICON[alert.currentAlert.level];
+                return (
+                  <Card
+                    key={`${alert.lat}-${alert.lon}-${alert.targetDate}`}
+                    className="flex-row items-center justify-between rounded-[18px] p-[16px_18px]"
+                  >
+                    <div className="flex items-center gap-[11px]">
+                      <span
+                        className={cn("flex size-[34px] items-center justify-center rounded-[11px]")}
+                        style={{ background: `${ALERT_HEX[alert.currentAlert.level]}29` }}
+                      >
+                        <Icon className="size-[18px]" style={{ color: ALERT_HEX[alert.currentAlert.level] }} />
+                      </span>
+                      <div>
+                        <p className="text-sm font-bold text-sd-strong">{alert.locationName}</p>
+                        <p className="mt-[1px] text-[11px] font-medium text-sd-muted">
+                          Watching for {alert.targetDate}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className="rounded-[10px] px-[9px] py-1 text-[11px] font-extrabold"
+                      style={{ color: "#20272e", background: ALERT_HEX[alert.currentAlert.level] }}
+                    >
+                      {ALERT_TERSE_LABEL[alert.currentAlert.level]}
+                    </span>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </DustySky>
   );
 }
