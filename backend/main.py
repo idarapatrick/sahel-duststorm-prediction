@@ -12,6 +12,12 @@ from alert_tracker import progressive_predict, get_all_tracked, clear_expired
 
 load_dotenv()
 
+from supabase import create_client
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL else None
+
 HF_SPACE_URL = os.getenv(
     "HF_SPACE_URL", "https://mavencodes-saheldust-api.hf.space/predict"
 )
