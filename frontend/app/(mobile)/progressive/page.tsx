@@ -7,6 +7,7 @@ import { DustySky } from "@/components/layout/DustySky";
 import { LocationPill } from "@/components/forecast/LocationPill";
 import { usePrediction } from "@/components/providers/PredictionProvider";
 import { ALERT_STATUS_LABEL } from "@/lib/riskStyles";
+import { formatLogTimestamp } from "@/lib/formatDate";
 import type { AlertLevel } from "@/lib/types";
 import { RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 
@@ -186,26 +187,29 @@ export default function TrackingPage() {
                 </button>
               </div>
               <div className="flex flex-col">
-                {[...data.history].reverse().map((update, i, arr) => (
-                  <div
-                    key={update.timestamp}
-                    className="flex items-center justify-between py-[9px]"
-                    style={i < arr.length - 1 ? { borderBottom: "1px solid rgba(255,255,255,.08)" } : undefined}
-                  >
-                    <span className="text-xs font-medium text-sd-secondary">
-                      {relativeDay(update.timestamp)}
-                    </span>
-                    <span
-                      className="text-[11px] font-extrabold"
-                      style={{ color: ALERT_HEX[update.alertLevel] }}
+                {[...data.history]
+                  .reverse()
+                  .slice(0, 10)
+                  .map((update, i, arr) => (
+                    <div
+                      key={update.timestamp}
+                      className="flex items-center justify-between py-[9px]"
+                      style={i < arr.length - 1 ? { borderBottom: "1px solid rgba(255,255,255,.08)" } : undefined}
                     >
-                      {ALERT_STATUS_LABEL[update.alertLevel]}
-                    </span>
-                    <span className="text-xs font-extrabold text-sd-strong">
-                      {(update.probability * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                ))}
+                      <span className="text-xs font-medium text-sd-secondary">
+                        {formatLogTimestamp(update.timestamp)}
+                      </span>
+                      <span
+                        className="text-[11px] font-extrabold"
+                        style={{ color: ALERT_HEX[update.alertLevel] }}
+                      >
+                        {ALERT_STATUS_LABEL[update.alertLevel]}
+                      </span>
+                      <span className="text-xs font-extrabold text-sd-strong">
+                        {(update.probability * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  ))}
               </div>
             </Card>
           </>

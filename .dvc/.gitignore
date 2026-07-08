@@ -1,3 +1,5 @@
 /config.local
 /tmp
 /cache
+.dvc/tmp/
+tmp/gdrive-user-credentials.json
