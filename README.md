@@ -110,8 +110,8 @@ SMS alerts to communities are only sent after a WMO operator reviews and confirm
 ### Step 1: Clone the repository
 
 ```bash
-git clone https://github.com/idarapatrick/Dual-Encoder-Model-for-Sahel-Dust-Forecasting.git
-cd Dual-Encoder-Model-for-Sahel-Dust-Forecasting
+git clone https://github.com/idarapatrick/sahel-duststorm-prediction.git
+cd sahel-duststorm-prediction
 ```
 
 ### Step 2: Set up the backend
