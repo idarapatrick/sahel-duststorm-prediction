@@ -40,6 +40,69 @@ OPEN_METEO_VARS = [
     "soil_moisture_0_to_7cm",
 ]
 
+CURRENT_WEATHER_VARS = [
+    "temperature_2m",
+    "relative_humidity_2m",
+    "apparent_temperature",
+    "dew_point_2m",
+    "precipitation",
+    "surface_pressure",
+    "wind_speed_10m",
+    "wind_direction_10m",
+    "wind_gusts_10m",
+    "visibility",
+    "cloud_cover",
+    "soil_moisture_0_to_7cm",
+]
+
+
+def _fetch_openmeteo_current(lat: float, lon: float) -> dict:
+    """Fetch the nearest current weather-model timestep from Open-Meteo."""
+    response = requests.get(
+        OPEN_METEO_URL,
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "current": ",".join(CURRENT_WEATHER_VARS),
+            "timezone": "UTC",
+            "wind_speed_unit": "ms",
+            "precipitation_unit": "mm",
+        },
+        timeout=30,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Open-Meteo current conditions error: {response.status_code} {response.text}"
+        )
+    payload = response.json()
+    current = payload.get("current")
+    if not current:
+        raise RuntimeError("Open-Meteo response did not contain current conditions")
+    wind_ms = float(current.get("wind_speed_10m") or 0.0)
+    return {
+        "observed_at": current.get("time"),
+        "interval_seconds": current.get("interval"),
+        "temperature_c": current.get("temperature_2m"),
+        "relative_humidity_pct": current.get("relative_humidity_2m"),
+        "apparent_temperature_c": current.get("apparent_temperature"),
+        "dewpoint_c": current.get("dew_point_2m"),
+        "precipitation_mm": current.get("precipitation"),
+        "surface_pressure_hpa": current.get("surface_pressure"),
+        "wind_speed_ms": round(wind_ms, 2),
+        "wind_speed_kmh": round(wind_ms * 3.6, 1),
+        "wind_direction_deg": current.get("wind_direction_10m"),
+        "wind_gusts_ms": current.get("wind_gusts_10m"),
+        "visibility_m": current.get("visibility"),
+        "cloud_cover_pct": current.get("cloud_cover"),
+        "soil_moisture": current.get("soil_moisture_0_to_7cm"),
+        "source": "open-meteo-current",
+    }
+
+
+async def fetch_current_conditions(lat: float, lon: float) -> dict:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _fetch_openmeteo_current, lat, lon)
+
 
 def get_location_name(lat: float, lon: float) -> str:
     """Reverse geocode coordinates to a place name using OpenStreetMap Nominatim."""
@@ -107,15 +170,17 @@ def _extract_72h_window(data: dict, target_date: datetime) -> list:
     hourly = data["hourly"]
     times = hourly["time"]
 
-    target_midnight = target_date.strftime("%Y-%m-%dT00:00")
-    if target_midnight not in times:
-        target_dt = datetime.strptime(target_midnight, "%Y-%m-%dT%H:%M")
+    # MODIS supervision is daily, so every feature window remains aligned to
+    # the target calendar day's midnight.
+    target_hour = target_date.strftime("%Y-%m-%dT00:00")
+    if target_hour not in times:
+        target_dt = datetime.strptime(target_hour, "%Y-%m-%dT%H:%M")
         closest_idx = min(
             range(len(times)),
             key=lambda i: abs(datetime.strptime(times[i], "%Y-%m-%dT%H:%M") - target_dt),
         )
     else:
-        closest_idx = times.index(target_midnight)
+        closest_idx = times.index(target_hour)
 
     start_idx = closest_idx - 60
     end_idx = closest_idx + 12

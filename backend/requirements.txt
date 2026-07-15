@@ -6,6 +6,7 @@ python-dotenv
 earthengine-api
 numpy
 requests
-supabase
+psycopg[binary]
+phonenumbers
 scikit-learn
 joblib
