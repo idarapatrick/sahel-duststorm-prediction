@@ -7,6 +7,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -16,7 +17,7 @@ load_dotenv()
 
 from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_detailed, fetch_features_for_date, fetch_forecast, get_location_name
 from alert_tracker import progressive_predict, get_all_tracked, clear_expired
-from history_store import RETENTION_DAYS, database_status, query_recent_snapshots, query_snapshots, save_snapshot
+from history_store import RETENTION_DAYS, database_status, query_latest_environmental_evidence, query_recent_snapshots, query_snapshots, save_snapshot
 from monitoring_store import ensure_monitoring_job
 from prediction_cache import build_cache_key, get_cached_prediction, try_acquire_prediction_lease
 from auth_store import AuthError, delete_account, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
@@ -55,6 +56,17 @@ async def request_metrics(request: Request, call_next):
         log_event(logger, "http_error", method=request.method, path=request.url.path,
                   error=type(exc).__name__, duration_ms=round((time.monotonic()-started)*1000))
         raise
+
+
+@app.exception_handler(Exception)
+async def unhandled_api_error(request: Request, exc: Exception):
+    """Return a safe JSON error so CORS middleware can preserve browser access."""
+    log_event(logger, "unhandled_api_error", method=request.method, path=request.url.path,
+              error=type(exc).__name__)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "The SahelWatch backend encountered an internal error"},
+    )
 
 
 class LocationPrediction(BaseModel):
@@ -389,7 +401,8 @@ async def predict_location(request: Request, lat: float, lon: float):
             "target_date": prediction_date, "probability": result["probability"],
             "alert_level": probability_to_alert(result["probability"]),
             "dust_event": result["dust_event"], "data_source": "open-meteo+gee" if GEE_AVAILABLE else "open-meteo+satellite-fallback",
-            "metadata": {"risk_level": result["risk_level"], "endpoint": "predict/location", "cache_key": cache_key, "provenance": provenance},
+            "metadata": {"risk_level": result["risk_level"], "endpoint": "predict/location", "cache_key": cache_key, "provenance": provenance,
+                         "surface_data": {"soil_moisture": surface[0], "vegetation_water_content": surface[1], "prev_day_aod": surface[2]}},
         })
         ensure_monitoring_job(lat, lon, (datetime.now(timezone.utc) + timedelta(days=1)).date())
         payload = prediction.model_dump(mode="json")
@@ -531,7 +544,16 @@ async def latest_prediction(lat: float, lon: float):
     snapshots = query_recent_snapshots(lat, lon, 1)
     if not snapshots:
         raise HTTPException(404, "No central prediction has been recorded for this location yet")
-    return {"prediction": snapshots[0]}
+    snapshot = snapshots[0]
+    surface = snapshot.get("metadata", {}).get("surface_data")
+    evidence = query_latest_environmental_evidence(lat, lon)
+    if not surface and evidence:
+        surface = {
+            "soil_moisture": evidence.get("soil_moisture"),
+            "vegetation_water_content": evidence.get("vegetation_water_content"),
+            "prev_day_aod": evidence.get("aod"),
+        }
+    return {"prediction": snapshot, "surface_data": surface, "evidence": evidence}
 
 
 # PENDING: Re-enable this route decorator only after final model evaluation and

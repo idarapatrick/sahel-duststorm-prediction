@@ -163,6 +163,28 @@ def query_recent_snapshots(lat: float, lon: float, limit: int = 10) -> list[dict
     return [_normalise_row(row) for row in rows]
 
 
+def query_latest_environmental_evidence(lat: float, lon: float) -> dict[str, Any] | None:
+    if not _using_postgres():
+        return None
+    with _postgres_connection() as connection:
+        row = connection.execute(
+            """SELECT e.observed_at,e.received_at,e.soil_moisture,
+                      e.vegetation_water_content,e.aod,e.raw_payload
+               FROM environmental_observations e JOIN locations l ON l.id=e.location_id
+               WHERE l.lat BETWEEN %s AND %s AND l.lon BETWEEN %s AND %s
+               ORDER BY e.received_at DESC LIMIT 1""",
+            (lat - 0.05, lat + 0.05, lon - 0.05, lon + 0.05),
+        ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    for key in ("observed_at", "received_at"):
+        item[key] = item[key].isoformat() if item.get(key) else None
+    if isinstance(item.get("raw_payload"), str):
+        item["raw_payload"] = json.loads(item["raw_payload"])
+    return item
+
+
 def load_progressive_state(tracking_key: str) -> dict[str, Any] | None:
     if _using_postgres():
         with _postgres_connection() as connection:
