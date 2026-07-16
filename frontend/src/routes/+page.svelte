@@ -3,20 +3,22 @@
 	import { Activity, ArrowRight, Bell, CalendarDays, Clock3, Droplets, Gauge, Info, Map, Navigation, Phone, Settings, ShieldCheck, Sparkles, Thermometer, Trash2, Wind } from 'lucide-svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import OnboardingFlow from '$lib/components/OnboardingFlow.svelte';
-	import PredictionMap from '$lib/components/PredictionMap.svelte';
 	import { DEFAULT_LOCATION, locations } from '$lib/locations';
-	import { demoPrediction, getActiveAlerts, getAuthState, getForecast, getHistory, getPrediction, getProgressiveEvidence, getRecentHistory, logout } from '$lib/api';
-	import type { ActiveAlert, AuthState, DailyHorizonResponse, Forecast, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence } from '$lib/types';
+	import { deleteAccount, demoPrediction, getActiveAlerts, getAuthState, getCurrentConditions, getHistory, getLatestPrediction, getNotifications, getPrediction, getRecentHistory, logout, saveAlertSubscription } from '$lib/api';
+	import type { ActiveAlert, AuthState, DailyHorizonResponse, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence } from '$lib/types';
 
 	let selected = DEFAULT_LOCATION;
 	let prediction: Prediction = demoPrediction(selected);
-	let forecast: Forecast | null = null;
 	let history: HistoricalSnapshot[] = [];
 	let recentHistory: HistoricalSnapshot[] = [];
 	let dailyHorizons: DailyHorizonResponse | null = null;
 	let progressive: ProgressiveEvidence | null = null;
 	let selectedHorizon: 'day+0' | 'day+1' | 'day+2' = 'day+0';
 	let activeAlerts: ActiveAlert[] = [];
+	let userNotifications: any[] = [];
+	let alertThreshold: 'watch' | 'warning' | 'alert' = 'warning';
+	let settingsBusy = false;
+	let PredictionMapComponent: any = null;
 	let linkedPhone = '';
 	let phoneMessage = '';
 	let authState: AuthState = { authenticated: false };
@@ -37,32 +39,54 @@
 	const multiHorizonComingSoon = true;
 
 	$: probability = Math.round(prediction.probability * 100);
-	$: riskCopy = prediction.riskLevel === 'clear' ? 'No significant storm expected' : prediction.riskLevel === 'watch' ? 'Dust activity is possible' : prediction.riskLevel === 'warning' ? 'Dust storm conditions are likely' : 'Severe dust event expected';
+	$: riskCopy = prediction.available === false ? 'Prediction temporarily unavailable' : prediction.riskLevel === 'clear' ? 'No significant storm expected' : prediction.riskLevel === 'watch' ? 'Dust activity is possible' : prediction.riskLevel === 'warning' ? 'Dust storm conditions are likely' : 'Severe dust event expected';
 	$: riskTone = prediction.riskLevel;
-	$: nextDay = forecast?.days?.[0];
 	$: horizon = dailyHorizons?.horizons.find((x) => x.horizon === selectedHorizon) || dailyHorizons?.horizons[0];
 	$: conditions = dailyHorizons?.conditions || progressive?.conditions || prediction.conditions;
 
 	async function loadLocation(location: Location) {
 		selected = location; loading = true; history = []; historyMessage = '';
-		const [predictionResult, forecastResult, progressiveResult] = await Promise.allSettled([
-			getPrediction(location), getForecast(location), getProgressiveEvidence(location)
+		const [latestResult, conditionsResult] = await Promise.allSettled([
+			getLatestPrediction(location), getCurrentConditions(location)
 		]);
-		if (predictionResult.status === 'fulfilled') {
-			prediction = predictionResult.value;
+		try {
+			prediction = latestResult.status === 'fulfilled' ? latestResult.value : await getPrediction(location);
+			if (conditionsResult.status === 'fulfilled') {
+				const c = conditionsResult.value;
+				prediction.conditions = { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: prediction.surfaceData?.vegetationWaterContent ?? 0, aod: prediction.surfaceData?.aod ?? 0 };
+			}
 			online = true;
-		} else {
-			prediction = demoPrediction(location);
-			online = false;
-		}
-		forecast = forecastResult.status === 'fulfilled' ? forecastResult.value : null;
-		progressive = progressiveResult.status === 'fulfilled' ? progressiveResult.value : null;
+		} catch { prediction = demoPrediction(location); online = false; }
+		progressive = null;
 		dailyHorizons = null;
 		loading = false; loadRecentHistory();
 	}
 
 	async function loadAlerts() {
 		try { activeAlerts = await getActiveAlerts(); } catch { activeAlerts = []; }
+		if (authState.authenticated) { try { userNotifications = await getNotifications(); } catch { userNotifications = []; } }
+	}
+	async function refreshCentralPrediction() {
+		try {
+			const latest = await getLatestPrediction(selected);
+			const c = await getCurrentConditions(selected);
+			latest.conditions = { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: latest.surfaceData?.vegetationWaterContent ?? 0, aod: latest.surfaceData?.aod ?? 0 };
+			prediction = latest; online = true;
+		} catch { /* Keep the last explicit state; never synthesize a probability. */ }
+		loadAlerts();
+	}
+	async function updateSubscription() {
+		settingsBusy = true; phoneMessage = '';
+		try { await saveAlertSubscription(selected, alertThreshold); phoneMessage = `SMS alerts saved for ${selected.name} at ${alertThreshold} level.`; }
+		catch (error) { phoneMessage = error instanceof Error ? error.message : 'Could not save alert preference.'; }
+		finally { settingsBusy = false; }
+	}
+	async function removeAccount() {
+		if (!window.confirm('Delete your phone account, sessions, subscriptions and alert delivery records? This cannot be undone.')) return;
+		settingsBusy = true;
+		try { await deleteAccount(); authState = { authenticated: false }; linkedPhone = ''; phoneMessage = 'Your phone account and alert records were deleted.'; }
+		catch (error) { phoneMessage = error instanceof Error ? error.message : 'Account deletion failed.'; }
+		finally { settingsBusy = false; }
 	}
 
 	async function signOut() {
@@ -88,15 +112,16 @@
 	async function loadRecentHistory() { try { recentHistory = await getRecentHistory(selected, 10); } catch { recentHistory = []; } }
 
 	onMount(() => {
+		import('$lib/components/PredictionMap.svelte').then((module) => PredictionMapComponent = module.default);
 		deviceId = localStorage.getItem('sahelwatch:device_id') || crypto.randomUUID(); localStorage.setItem('sahelwatch:device_id', deviceId);
 		const savedLocation = localStorage.getItem('sahelwatch:location');
 		if (savedLocation) { try { selected = JSON.parse(savedLocation); } catch { /* use default */ } }
 		const alreadyShown = sessionStorage.getItem('sahelwatch:splash_shown') === 'true';
 		showSplash = !alreadyShown; sessionStorage.setItem('sahelwatch:splash_shown', 'true');
 		window.setTimeout(() => { showSplash = false; showOnboarding = localStorage.getItem('sahelwatch:onboarded') !== 'true'; }, alreadyShown ? 0 : 1200);
-		getAuthState().then((state) => { authState = state; linkedPhone = state.user?.phoneUid || ''; }).catch(() => {});
+		getAuthState().then((state) => { authState = state; linkedPhone = state.user?.phoneUid || ''; loadAlerts(); }).catch(() => {});
 		loadLocation(selected); loadAlerts(); loadRecentHistory();
-		const reinforcementTimer = window.setInterval(() => loadLocation(selected), 10 * 60 * 60 * 1000);
+		const reinforcementTimer = window.setInterval(refreshCentralPrediction, 15 * 60 * 1000);
 		return () => window.clearInterval(reinforcementTimer);
 	});
 </script>
@@ -114,6 +139,7 @@
 {#if showAuth}<OnboardingFlow {deviceId} initialLocation={selected} authOnly on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
 
 <div class="app-shell">
+	{#if prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
 	<AppHeader bind:selected {online} on:select={(e) => loadLocation(e.detail)} />
 
 	<nav class="tabs glass" aria-label="Primary navigation">
@@ -128,17 +154,17 @@
 		{#if activeTab === 'overview'}
 			<section class="hero" aria-labelledby="forecast-heading">
 				<div class="hero-copy">
-					<div class="place"><i class:demo={!online}></i>{online ? 'Live forecast' : 'Demonstration snapshot'} · {selected.name}, {selected.country}</div>
+					<div class="place"><i class:demo={!online}></i>{online ? 'Central prediction' : 'Prediction unavailable'} · {selected.name}, {selected.country}</div>
 					<p class="eyebrow">Next 24–48 hours</p>
-					<h1 id="forecast-heading">{riskCopy}<span class="risk-word {riskTone}">{probability}% risk</span></h1>
+					<h1 id="forecast-heading">{riskCopy}<span class="risk-word {riskTone}">{prediction.available === false ? 'Try again shortly' : `${probability}% risk`}</span></h1>
 					<p class="summary">SahelWatch combines atmospheric forecasts and satellite surface observations to identify dust-emission conditions before they reach nearby communities.</p>
 					<div class="hero-actions">
 						<button class="primary" on:click={() => activeTab = 'tracking'}>Track this forecast <ArrowRight size={18}/></button>
 						<button class="secondary" on:click={() => activeTab = 'history'}><CalendarDays size={18}/> Search past conditions</button>
 					</div>
 				</div>
-				<div class="risk-orb {riskTone}" style={`--value:${prediction.probability}`} aria-label="{probability} percent dust-storm probability">
-					<div><span>{loading ? '—' : probability}</span><small>%</small><p>{prediction.riskLevel}</p></div>
+				<div class="risk-orb {riskTone}" style={`--value:${prediction.available === false ? 0 : prediction.probability}`} aria-label={prediction.available === false ? 'Prediction unavailable' : `${probability} percent dust-storm probability`}>
+					<div><span>{loading || prediction.available === false ? '—' : probability}</span>{#if prediction.available !== false}<small>%</small>{/if}<p>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</p></div>
 				</div>
 			</section>
 
@@ -151,14 +177,12 @@
 
 			{#if prediction.inputQuality?.degraded || progressive?.inputQuality?.degraded}<div class="data-warning" role="status"><Info size={18}/><p><strong>Degraded satellite input:</strong> {progressive?.inputQuality?.warning || prediction.inputQuality?.warning} This probability is a live model output, but should be interpreted cautiously.</p></div>{/if}
 			<section class="explanation glass">
-				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">Prediction evidence</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% reinforced prediction · ${progressive.confidencePct}% observed-data completeness` : online ? 'Live model prediction received' : 'Prediction service is unreachable'}</h2><p>{progressive?.message || (online ? 'The probability above came from the deployed model.' : 'SahelWatch is showing a clearly labelled demonstration snapshot because the current prediction request failed.')}</p><small>{progressive ? `${progressive.observedHours} of 72 hours are observations; ${progressive.forecastHours} remain forecast data.` : 'No environmental values are invented on the client.'}</small></div>
+				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">Prediction evidence</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% reinforced prediction · ${progressive.confidencePct}% observed-data completeness` : online ? 'Latest centrally stored model prediction' : 'Prediction service is unreachable'}</h2><p>{progressive?.message || (online ? 'The probability above came from the deployed model and is refreshed from durable central monitoring.' : 'No synthetic probability is being displayed. Retry when the prediction service becomes available.')}</p><small>{progressive ? `${progressive.observedHours} of 72 hours are observations; ${progressive.forecastHours} remain forecast data.` : 'No environmental values are invented on the client.'}</small></div>
 			</section>
 
 			<section class="forecast-strip glass">
-				<div><p class="eyebrow">Next update</p><strong>Continuous monitoring</strong><small>Forecasts refine as observed data replaces forecast data.</small></div>
-				{#each forecast?.days || [] as day}
-					<div class="day"><span>{new Date(`${day.date}T12:00:00`).toLocaleDateString('en', { weekday: 'short' })}</span><strong>{Math.round(day.probability * 100)}%</strong><small>{day.risk}</small></div>
-				{:else}<div class="day"><span>Tomorrow</span><strong>{nextDay ? Math.round(nextDay.probability * 100) : probability}%</strong><small>estimated</small></div>{/each}
+				<div><p class="eyebrow">Next update</p><strong>Continuous monitoring</strong><small>The server worker refreshes evidence every six hours without requiring this browser.</small></div>
+				<div class="day"><span>Current target</span><strong>{prediction.available === false ? '—' : `${probability}%`}</strong><small>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</small></div><div class="day"><span>Day+1</span><strong>—</strong><small>Coming soon</small></div><div class="day"><span>Day+2</span><strong>—</strong><small>Coming soon</small></div>
 			</section>
 
 		{:else if activeTab === 'tracking'}
@@ -170,7 +194,7 @@
 				<span>Coming soon</span>
 			</div>
 			<section class="tracking-grid">
-				<div class="tracking-map glass"><PredictionMap location={selected} {prediction}/></div>
+				<div class="tracking-map glass">{#if PredictionMapComponent}<svelte:component this={PredictionMapComponent} location={selected} {prediction} conditions={prediction.conditions}/>{:else}<div class="map-loading" role="status">Loading tracking map…</div>{/if}</div>
 				<aside class="detail glass"><div class="detail-top"><span class="badge {horizon?.riskLevel || riskTone}">{horizon?.riskLevel || prediction.riskLevel}</span><small>{horizon?.targetDate || prediction.predictionDate}</small></div><h2>{horizon ? Math.round(horizon.probability * 100) : probability}% probability</h2><p>{horizon ? `${horizon.horizon} covers ${horizon.approximateLeadTime}.` : riskCopy}</p><dl><div><dt><Clock3 size={17}/>Daily horizon</dt><dd>{horizon?.horizon || 'Single-head model'}</dd></div><div><dt><Activity size={17}/>Approximate lead</dt><dd>{horizon?.approximateLeadTime || 'Not available'}</dd></div><div><dt><ShieldCheck size={17}/>Supervision</dt><dd>Daily MODIS AOD</dd></div><div><dt><Map size={17}/>Coordinates</dt><dd>{selected.lat.toFixed(2)}°, {selected.lon.toFixed(2)}°</dd></div></dl><div class="notice"><Info size={18}/><p>The horizons are calendar-day outputs. SahelWatch does not claim independent 12h/24h/36h/48h clock-hour labels.</p></div></aside>
 			</section>
 
@@ -193,17 +217,17 @@
 			<section class="utility-page">
 				<div class="subpage-head"><div><p class="eyebrow">Broadcast centre</p><h1>Notifications & alerts</h1><p>Risk changes and high-confidence storm broadcasts appear here and as in-app banners.</p></div></div>
 				{#if !linkedPhone}<div class="offline-callout glass"><Phone size={22}/><div><strong>Offline alerts are not active</strong><p>Link a phone number in Settings to receive SMS broadcasts when you do not have internet access.</p></div><button on:click={() => activeTab = 'settings'}>Link phone</button></div>{/if}
-				<div class="notification-list">
-					{#each activeAlerts.flatMap((a) => a.updates.map((u) => ({ ...u, locationName: a.locationName }))).sort((a,b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 20) as item}
-						<article class="notification glass"><span class="notification-mark {item.alertLevel}"><Bell size={18}/></span><div><strong>{item.locationName}: {item.alertLevel}</strong><p>{Math.round(item.probability * 100)}% probability · {item.confidence}% observed-data confidence</p><small>{new Date(item.timestamp).toLocaleString()}</small></div></article>
+				<div class="notification-list" aria-live="polite">
+					{#each (authState.authenticated ? userNotifications.map((n) => ({ timestamp: n.created_at, probability: n.probability, alertLevel: n.current_level, locationName: n.location_name, confidence: n.direction })) : activeAlerts.flatMap((a) => a.updates.map((u) => ({ ...u, locationName: a.locationName })))).sort((a,b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 20) as item}
+						<article class="notification glass"><span class="notification-mark {item.alertLevel}"><Bell size={18}/></span><div><strong>{item.locationName}: {item.alertLevel}</strong><p>{Math.round(item.probability * 100)}% probability · {typeof item.confidence === 'number' ? `${item.confidence}% observed-data completeness` : item.confidence}</p><small>{new Date(item.timestamp).toLocaleString()}</small></div></article>
 					{:else}<div class="empty glass"><Bell size={28}/><h2>No broadcasts yet</h2><p>New risk-level changes will be recorded here.</p></div>{/each}
 				</div>
 			</section>
 		{:else}
 			<section class="utility-page settings-page">
 				<div class="subpage-head"><div><p class="eyebrow">Personalisation</p><h1>Settings</h1><p>Your phone number is the only personal information SahelWatch needs.</p></div></div>
-				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is your unique account ID. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{/if}{#if phoneMessage}<p class="form-message" role="status">{phoneMessage}</p>{/if}</section>
-				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a><button class="danger-row"><Trash2 size={17}/>Delete account and alert records</button></section>
+				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is your unique account ID. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button><button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{/if}{#if phoneMessage}<p class="form-message" role="status" aria-live="polite">{phoneMessage}</p>{/if}</section>
+				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a><button class="danger-row" disabled={settingsBusy || !authState.authenticated} on:click={removeAccount}><Trash2 size={17}/>Delete account and alert records</button></section>
 			</section>
 		{/if}
 	</main>
@@ -211,6 +235,7 @@
 </div>
 
 <style>
+	.critical-banner{position:sticky;z-index:40;top:8px;margin-bottom:8px;padding:12px 16px;display:flex;align-items:center;gap:10px;border-radius:16px;color:white;background:var(--red);box-shadow:var(--shadow-md)}.critical-banner button{margin-left:auto;min-height:44px;padding:0 14px;border:1px solid rgba(255,255,255,.45);border-radius:14px;color:white;background:rgba(255,255,255,.12);cursor:pointer}.threshold-field{margin-top:20px;display:grid;gap:8px;color:var(--text-secondary);font-size:.8rem;font-weight:600}.threshold-field select{min-height:48px;padding:0 14px;border:1px solid var(--border);border-radius:14px;color:var(--text);background:var(--surface-solid)}.map-loading{height:100%;display:grid;place-items:center;color:var(--text-secondary)}
 	.splash{position:fixed;z-index:1100;inset:0;display:grid;place-content:center;justify-items:center;background:var(--bg);color:var(--text)}.splash span{width:74px;height:74px;display:grid;place-items:center;border-radius:24px;color:white;background:var(--blue);box-shadow:0 22px 50px rgba(0,122,255,.25)}.splash strong{margin-top:18px;font-size:1.55rem;letter-spacing:-.04em}.splash small{margin-top:6px;color:var(--text-secondary)}
 	.app-shell { width: min(1480px, calc(100% - 28px)); margin: 0 auto; padding: 14px 0 28px; }
 	.tabs { width: max-content; margin: 16px auto 0; padding: 5px; display: flex; gap: 3px; border-radius: var(--radius-pill); }

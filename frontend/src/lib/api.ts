@@ -55,6 +55,43 @@ export async function getAuthState(): Promise<AuthState> {
 
 export async function logout() { return postJson('/api/v1/auth/logout'); }
 
+async function deleteJson(path: string) {
+	const response = await fetch(`${base}${path}`, { method: 'DELETE', credentials: 'include' });
+	const payload = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
+	return payload;
+}
+
+export async function deleteAccount() { return deleteJson('/api/v1/auth/account'); }
+
+export async function saveAlertSubscription(location: Location, threshold: 'watch' | 'warning' | 'alert') {
+	const response = await fetch(`${base}/api/v1/subscriptions`, {
+		method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ lat: location.lat, lon: location.lon, location_name: `${location.name}, ${location.country}`, threshold })
+	});
+	const payload = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
+	return payload;
+}
+
+export async function getNotifications() {
+	const d = await getJson('/api/v1/notifications?limit=50');
+	return d.notifications;
+}
+
+export async function getLatestPrediction(location: Location): Promise<Prediction> {
+	const d = await getJson(`/api/v1/predictions/latest?lat=${location.lat}&lon=${location.lon}`);
+	const x = d.prediction;
+	return { lat: x.lat, lon: x.lon, locationName: x.location_name, probability: x.probability,
+		riskLevel: x.alert_level, dustEvent: x.dust_event, predictionDate: x.target_date,
+		dataSource: x.data_source, available: true };
+}
+
+export async function getCurrentConditions(location: Location) {
+	const d = await getJson(`/api/v1/conditions/current?lat=${location.lat}&lon=${location.lon}`);
+	return d.current_conditions;
+}
+
 export async function getPrediction(location: Location): Promise<Prediction> {
 	const d = await getJson(`/api/v1/predict/location?lat=${location.lat}&lon=${location.lon}`);
 	const c = d.current_conditions;
@@ -76,7 +113,8 @@ export async function getPrediction(location: Location): Promise<Prediction> {
 			vegetationWaterContent: d.surface_data.vegetation_water_content,
 			aod: d.surface_data.prev_day_aod
 		} : undefined,
-		inputQuality: d.input_quality ? { degraded: d.input_quality.degraded, warning: d.input_quality.warning } : undefined
+		inputQuality: d.input_quality ? { degraded: d.input_quality.degraded, warning: d.input_quality.warning, fields: d.input_quality } : undefined,
+		available: true
 	};
 }
 
@@ -147,6 +185,5 @@ export async function getActiveAlerts(): Promise<ActiveAlert[]> {
 }
 
 export function demoPrediction(location: Location): Prediction {
-	const probability = location.name === 'Niamey' ? .34 : Math.max(.12, Math.min(.72, .28 + (location.lon % 7) / 18));
-	return { ...location, locationName: `${location.name}, ${location.country}`, probability, riskLevel: alertLevel(probability), dustEvent: probability >= .5, predictionDate: new Date().toISOString().slice(0, 10), dataSource: 'Demonstration snapshot' };
+	return { ...location, locationName: `${location.name}, ${location.country}`, probability: 0, riskLevel: 'clear', dustEvent: false, predictionDate: new Date().toISOString().slice(0, 10), dataSource: 'Unavailable', available: false };
 }
