@@ -44,7 +44,7 @@
 		const label = prediction.available === false ? 'Unavailable' : `${Math.round(prediction.probability * 100)}%`;
 		el.setAttribute('aria-label', prediction.available === false ? `${prediction.locationName}, prediction unavailable` : `${prediction.locationName}, ${label} dust risk`);
 		el.innerHTML = `<span>${label}</span>`;
-		marker = new maplibregl.Marker({ element: el }).setLngLat([location.lon, location.lat]).setPopup(new maplibregl.Popup({ offset: 26, closeButton: false }).setHTML(`<strong>${prediction.locationName}</strong><p>${prediction.available === false ? 'Prediction unavailable' : `${label} probability · ${prediction.riskLevel}`}</p>`)).addTo(map);
+		marker = new maplibregl.Marker({ element: el }).setLngLat([location.lon, location.lat]).setPopup(new maplibregl.Popup({ offset: 26, closeButton: false }).setHTML(`<strong>${prediction.locationName}</strong><p>${prediction.available === false ? 'Dust outlook unavailable' : `${label} chance of dusty conditions · ${prediction.riskLevel}`}</p>`)).addTo(map);
 		showTransportCorridor();
 		map.flyTo({ center: [location.lon, location.lat], zoom: 5.2, duration: 850 });
 	}
@@ -59,7 +59,7 @@
 	onDestroy(() => map?.remove());
 </script>
 
-<div class="map-shell"><div bind:this={container} class="map" aria-label="Dust-risk map centred on {location.name}"></div>{#if conditions}<div class="corridor-note"><strong>Wind transport corridor</strong><span>{conditions.windSpeedKmh} km/h · toward {Math.round((conditions.windDirectionDeg + 180) % 360)}°</span><small>Directional weather guidance—not a predicted storm boundary or evacuation route.</small></div>{/if}</div>
+<div class="map-shell"><div bind:this={container} class="map" aria-label="Dust-risk map centred on {location.name}"></div>{#if conditions}<div class="corridor-note"><strong>Where the wind is moving</strong><span>{conditions.windSpeedKmh} km/h · toward {Math.round((conditions.windDirectionDeg + 180) % 360)}°</span><small>This line shows wind direction. It is not a storm boundary or evacuation route.</small></div>{/if}</div>
 
 <style>
 	.map-shell,.map { width: 100%; height: 100%; }.map-shell{position:relative}.map { min-height: 420px; background: #e8ebed; }.corridor-note{position:absolute;z-index:2;right:12px;bottom:28px;left:12px;padding:12px 14px;display:grid;gap:3px;border:1px solid rgba(255,255,255,.7);border-radius:16px;color:#17171a;background:rgba(255,255,255,.86);box-shadow:0 10px 30px rgba(15,23,42,.12);backdrop-filter:blur(18px)}.corridor-note span,.corridor-note small{color:#626269}.corridor-note small{line-height:1.4}

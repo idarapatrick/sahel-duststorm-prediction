@@ -18,6 +18,8 @@
 	let userNotifications: any[] = [];
 	let alertThreshold: 'watch' | 'warning' | 'alert' = 'warning';
 	let settingsBusy = false;
+	let showDeleteConfirm = false;
+	let deleteError = '';
 	let PredictionMapComponent: any = null;
 	let linkedPhone = '';
 	let phoneMessage = '';
@@ -28,6 +30,8 @@
 	let showAuth = false;
 	let online = true;
 	let loading = true;
+	let forecastProgress = 0;
+	let progressTimer: ReturnType<typeof setInterval> | undefined;
 	let historyLoading = false;
 	let historyMessage = '';
 	let activeTab: 'overview' | 'tracking' | 'history' | 'notifications' | 'settings' = 'overview';
@@ -45,20 +49,26 @@
 	$: conditions = dailyHorizons?.conditions || progressive?.conditions || prediction.conditions;
 
 	async function loadLocation(location: Location) {
-		selected = location; loading = true; history = []; historyMessage = '';
-		const [latestResult, conditionsResult] = await Promise.allSettled([
-			getLatestPrediction(location), getCurrentConditions(location)
-		]);
+		selected = location; loading = true; forecastProgress = 8; history = []; historyMessage = '';
+		prediction = demoPrediction(location);
+		if (progressTimer) clearInterval(progressTimer);
+		progressTimer = setInterval(() => forecastProgress = Math.min(82, forecastProgress + (forecastProgress < 45 ? 7 : 3)), 450);
+		const latestRequest = getLatestPrediction(location).then((value) => { forecastProgress = Math.max(forecastProgress, 72); return value; });
+		const weatherRequest = getCurrentConditions(location).then((value) => { forecastProgress = Math.max(forecastProgress, 45); return value; });
+		const [latestResult, conditionsResult] = await Promise.allSettled([latestRequest, weatherRequest]);
 		try {
-			prediction = latestResult.status === 'fulfilled' ? latestResult.value : await getPrediction(location);
+			if (latestResult.status === 'fulfilled') prediction = latestResult.value;
+			else { forecastProgress = Math.max(forecastProgress, 84); prediction = await getPrediction(location); forecastProgress = 94; }
 			if (conditionsResult.status === 'fulfilled') {
 				const c = conditionsResult.value;
-				prediction.conditions = { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: prediction.surfaceData?.vegetationWaterContent ?? 0, aod: prediction.surfaceData?.aod ?? 0 };
+				prediction = { ...prediction, conditions: { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: prediction.surfaceData?.vegetationWaterContent ?? 0, aod: prediction.surfaceData?.aod ?? 0 } };
 			}
 			online = true;
 		} catch { prediction = demoPrediction(location); online = false; }
 		progressive = null;
 		dailyHorizons = null;
+		forecastProgress = 100; if (progressTimer) clearInterval(progressTimer);
+		await new Promise((resolve) => setTimeout(resolve, 250));
 		loading = false; loadRecentHistory();
 	}
 
@@ -70,8 +80,7 @@
 		try {
 			const latest = await getLatestPrediction(selected);
 			const c = await getCurrentConditions(selected);
-			latest.conditions = { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: latest.surfaceData?.vegetationWaterContent ?? 0, aod: latest.surfaceData?.aod ?? 0 };
-			prediction = latest; online = true;
+			prediction = { ...latest, conditions: { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: latest.surfaceData?.vegetationWaterContent ?? 0, aod: latest.surfaceData?.aod ?? 0 } }; online = true;
 		} catch { /* Keep the last explicit state; never synthesize a probability. */ }
 		loadAlerts();
 	}
@@ -82,10 +91,9 @@
 		finally { settingsBusy = false; }
 	}
 	async function removeAccount() {
-		if (!window.confirm('Delete your phone account, sessions, subscriptions and alert delivery records? This cannot be undone.')) return;
-		settingsBusy = true;
-		try { await deleteAccount(); authState = { authenticated: false }; linkedPhone = ''; phoneMessage = 'Your phone account and alert records were deleted.'; }
-		catch (error) { phoneMessage = error instanceof Error ? error.message : 'Account deletion failed.'; }
+		settingsBusy = true; deleteError = '';
+		try { await deleteAccount(); authState = { authenticated: false }; linkedPhone = ''; showDeleteConfirm = false; phoneMessage = 'Your phone account and alert records were deleted.'; }
+		catch (error) { deleteError = error instanceof Error ? error.message : 'We could not delete the account. Please try again.'; }
 		finally { settingsBusy = false; }
 	}
 
@@ -137,6 +145,7 @@
 	<OnboardingFlow {deviceId} initialLocation={selected} on:complete={finishOnboarding}/>
 {/if}
 {#if showAuth}<OnboardingFlow {deviceId} initialLocation={selected} authOnly on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
+{#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span><h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">Your phone number, sign-ins, SMS choices and alert records will be permanently removed. This cannot be undone.</p>{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={() => showDeleteConfirm=false}>Keep account</button><button class="delete-confirm" disabled={settingsBusy} on:click={removeAccount}>{settingsBusy ? 'Deleting…' : 'Delete permanently'}</button></div></section></div>{/if}
 
 <div class="app-shell">
 	{#if prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
@@ -154,14 +163,16 @@
 		{#if activeTab === 'overview'}
 			<section class="hero" aria-labelledby="forecast-heading">
 				<div class="hero-copy">
-					<div class="place"><i class:demo={!online}></i>{online ? 'Central prediction' : 'Prediction unavailable'} · {selected.name}, {selected.country}</div>
+					{#if loading}<div class="forecast-wait" role="status" aria-live="polite"><p class="eyebrow">Preparing your dust outlook</p><h1 id="forecast-heading">Please stay calm. The outlook for {selected.name} is being prepared.</h1><div class="progress-track" role="progressbar" aria-label="Outlook preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={forecastProgress}><span style={`width:${forecastProgress}%`}></span></div><strong>{forecastProgress}% complete</strong></div>{:else}
+					<div class="place"><i class:demo={!online}></i>{online ? 'Latest dust outlook' : 'Dust outlook unavailable'} · {selected.name}, {selected.country}</div>
 					<p class="eyebrow">Next 24–48 hours</p>
 					<h1 id="forecast-heading">{riskCopy}<span class="risk-word {riskTone}">{prediction.available === false ? 'Try again shortly' : `${probability}% risk`}</span></h1>
-					<p class="summary">SahelWatch combines atmospheric forecasts and satellite surface observations to identify dust-emission conditions before they reach nearby communities.</p>
+					<p class="summary">SahelWatch checks wind, heat, ground dryness and dust in the air to give communities early notice of possible dusty conditions.</p>
 					<div class="hero-actions">
 						<button class="primary" on:click={() => activeTab = 'tracking'}>Track this forecast <ArrowRight size={18}/></button>
 						<button class="secondary" on:click={() => activeTab = 'history'}><CalendarDays size={18}/> Search past conditions</button>
 					</div>
+					{/if}
 				</div>
 				<div class="risk-orb {riskTone}" style={`--value:${prediction.available === false ? 0 : prediction.probability}`} aria-label={prediction.available === false ? 'Prediction unavailable' : `${probability} percent dust-storm probability`}>
 					<div><span>{loading || prediction.available === false ? '—' : probability}</span>{#if prediction.available !== false}<small>%</small>{/if}<p>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</p></div>
@@ -169,15 +180,15 @@
 			</section>
 
 			<section class="metrics" aria-label="Environmental forecast indicators">
-				<article class="glass"><span class="metric-icon"><Wind size={20}/></span><div><p>Wind speed</p><strong>{conditions ? `${conditions.windSpeedKmh} km/h` : 'Unavailable'}</strong><small>{conditions ? `${conditions.windDirectionDeg}° direction` : 'live model input'}</small></div></article>
-				<article class="glass"><span class="metric-icon"><Thermometer size={20}/></span><div><p>Temperature</p><strong>{conditions ? `${conditions.temperatureC}°C` : 'Unavailable'}</strong><small>nearest current hour</small></div></article>
-				<article class="glass"><span class="metric-icon"><Droplets size={20}/></span><div><p>Soil moisture</p><strong>{conditions ? `${(conditions.soilMoisture * 100).toFixed(1)}%` : progressive ? `${(progressive.soilMoisture * 100).toFixed(1)}%` : 'Unavailable'}</strong><small>surface emission signal</small></div></article>
-				<article class="glass"><span class="metric-icon"><Gauge size={20}/></span><div><p>Atmosphere · AOD</p><strong>{conditions?.aod ? conditions.aod.toFixed(2) : progressive?.aod ? progressive.aod.toFixed(2) : 'Unavailable'}</strong><small>{progressive?.aod === 0 ? 'satellite value missing or zero' : 'satellite dust signal'}</small></div></article>
+				<article class="glass"><span class="metric-icon"><Wind size={20}/></span><div><p>Wind speed</p><strong>{conditions ? `${conditions.windSpeedKmh} km/h` : 'Unavailable'}</strong><small>{conditions ? `${conditions.windDirectionDeg}° direction` : 'Latest wind reading'}</small></div></article>
+				<article class="glass"><span class="metric-icon"><Thermometer size={20}/></span><div><p>Temperature</p><strong>{conditions ? `${conditions.temperatureC}°C` : 'Unavailable'}</strong><small>Latest reading near this area</small></div></article>
+				<article class="glass"><span class="metric-icon"><Droplets size={20}/></span><div><p>Soil moisture</p><strong>{conditions ? `${(conditions.soilMoisture * 100).toFixed(1)}%` : progressive ? `${(progressive.soilMoisture * 100).toFixed(1)}%` : 'Unavailable'}</strong><small>Drier ground can release more dust</small></div></article>
+				<article class="glass"><span class="metric-icon"><Gauge size={20}/></span><div><p>Dust in the air</p><strong>{conditions?.aod ? conditions.aod.toFixed(2) : progressive?.aod ? progressive.aod.toFixed(2) : 'Unavailable'}</strong><small>{progressive?.aod === 0 ? 'No recent satellite reading' : 'Latest satellite dust reading'}</small></div></article>
 			</section>
 
-			{#if prediction.inputQuality?.degraded || progressive?.inputQuality?.degraded}<div class="data-warning" role="status"><Info size={18}/><p><strong>Degraded satellite input:</strong> {progressive?.inputQuality?.warning || prediction.inputQuality?.warning} This probability is a live model output, but should be interpreted cautiously.</p></div>{/if}
+			{#if prediction.inputQuality?.degraded || progressive?.inputQuality?.degraded}<div class="data-warning" role="status"><Info size={18}/><p><strong>Some satellite readings are not available.</strong> The dust outlook may change when newer readings arrive. Please check again later.</p></div>{/if}
 			<section class="explanation glass">
-				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">Prediction evidence</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% reinforced prediction · ${progressive.confidencePct}% observed-data completeness` : online ? 'Latest centrally stored model prediction' : 'Prediction service is unreachable'}</h2><p>{progressive?.message || (online ? 'The probability above came from the deployed model and is refreshed from durable central monitoring.' : 'No synthetic probability is being displayed. Retry when the prediction service becomes available.')}</p><small>{progressive ? `${progressive.observedHours} of 72 hours are observations; ${progressive.forecastHours} remain forecast data.` : 'No environmental values are invented on the client.'}</small></div>
+				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% chance of dusty conditions` : online ? `Latest dust outlook for ${selected.name}` : 'Dust information is temporarily unavailable'}</h2><p>{progressive?.message || (online ? 'This outlook updates automatically as new wind, temperature, ground and satellite readings arrive.' : 'Please check your connection and try again shortly.')}</p><small>{progressive ? `${progressive.observedHours} recent weather readings are available; the remaining hours use the latest weather forecast.` : 'Weather details are shown only when recent readings are available.'}</small></div>
 			</section>
 
 			<section class="forecast-strip glass">
@@ -189,13 +200,13 @@
 			<section class="subpage-head"><div><p class="eyebrow">Tracking</p><h1>Monitor {selected.name}</h1><p>Inspect the current risk and predicted 24–48 hour window.</p></div><select bind:value={selected} on:change={() => loadLocation(selected)} aria-label="Tracking location">{#each locations as location}<option value={location}>{location.name}, {location.country}</option>{/each}</select></section>
 			<div class="horizon-coming-soon" aria-disabled="true">
 				<div class="horizon-picker glass" aria-label="Daily prediction horizons — coming soon">
-					{#each dailyHorizonNames as day}<button disabled={multiHorizonComingSoon || !dailyHorizons} title="Coming soon after final model evaluation and ONNX export" class:active={!multiHorizonComingSoon && Boolean(dailyHorizons) && selectedHorizon === day} on:click={() => selectedHorizon = day}>{day}</button>{/each}
+					{#each dailyHorizonNames as day}<button disabled={multiHorizonComingSoon || !dailyHorizons} title="Future daily outlooks are coming soon" class:active={!multiHorizonComingSoon && Boolean(dailyHorizons) && selectedHorizon === day} on:click={() => selectedHorizon = day}>{day}</button>{/each}
 				</div>
 				<span>Coming soon</span>
 			</div>
 			<section class="tracking-grid">
 				<div class="tracking-map glass">{#if PredictionMapComponent}<svelte:component this={PredictionMapComponent} location={selected} {prediction} conditions={prediction.conditions}/>{:else}<div class="map-loading" role="status">Loading tracking map…</div>{/if}</div>
-				<aside class="detail glass"><div class="detail-top"><span class="badge {horizon?.riskLevel || riskTone}">{horizon?.riskLevel || prediction.riskLevel}</span><small>{horizon?.targetDate || prediction.predictionDate}</small></div><h2>{horizon ? Math.round(horizon.probability * 100) : probability}% probability</h2><p>{horizon ? `${horizon.horizon} covers ${horizon.approximateLeadTime}.` : riskCopy}</p><dl><div><dt><Clock3 size={17}/>Daily horizon</dt><dd>{horizon?.horizon || 'Single-head model'}</dd></div><div><dt><Activity size={17}/>Approximate lead</dt><dd>{horizon?.approximateLeadTime || 'Not available'}</dd></div><div><dt><ShieldCheck size={17}/>Supervision</dt><dd>Daily MODIS AOD</dd></div><div><dt><Map size={17}/>Coordinates</dt><dd>{selected.lat.toFixed(2)}°, {selected.lon.toFixed(2)}°</dd></div></dl><div class="notice"><Info size={18}/><p>The horizons are calendar-day outputs. SahelWatch does not claim independent 12h/24h/36h/48h clock-hour labels.</p></div></aside>
+				<aside class="detail glass"><div class="detail-top"><span class="badge {horizon?.riskLevel || riskTone}">{horizon?.riskLevel || prediction.riskLevel}</span><small>{horizon?.targetDate || prediction.predictionDate}</small></div><h2>{horizon ? Math.round(horizon.probability * 100) : probability}% chance</h2><p>{horizon ? `Dust outlook for ${horizon.targetDate}.` : riskCopy}</p><dl><div><dt><Clock3 size={17}/>Outlook period</dt><dd>{horizon?.approximateLeadTime || 'Next 24–48 hours'}</dd></div><div><dt><Activity size={17}/>Wind speed</dt><dd>{conditions ? `${conditions.windSpeedKmh} km/h` : 'Not available'}</dd></div><div><dt><ShieldCheck size={17}/>Ground condition</dt><dd>{conditions ? `${(conditions.soilMoisture * 100).toFixed(1)}% moisture` : 'Not available'}</dd></div><div><dt><Map size={17}/>Area</dt><dd>{selected.name}, {selected.country}</dd></div></dl><div class="notice"><Info size={18}/><p>The line on the map shows where the wind is moving. It is not a storm boundary or evacuation route. Follow local authorities during dangerous weather.</p></div></aside>
 			</section>
 
 		{:else if activeTab === 'history'}
@@ -207,7 +218,7 @@
 					<label><span>Date</span><input type="date" bind:value={searchDate} min={minDate} max={today}/></label>
 					<button class="primary" disabled={historyLoading}>{historyLoading ? 'Searching…' : 'Search archive'} <ArrowRight size={18}/></button>
 				</form>
-				<div class="coverage-note"><Info size={18}/><p><strong>Coverage note:</strong> Ilorin is south of the currently validated 10–25°N model boundary. SahelWatch will not present unvalidated results for it.</p></div>
+				<div class="coverage-note"><Info size={18}/><p><strong>Area not yet covered:</strong> SahelWatch does not currently provide trusted dust outlooks for Ilorin. Please choose one of the available locations.</p></div>
 				{#if historyMessage}<p class="history-message" role="status">{historyMessage}</p>{/if}
 				{#each history as item}
 					<article class="history-result glass"><div><p class="eyebrow">Recorded {new Date(item.recordedAt).toLocaleString()}</p><h2>{item.locationName}</h2><p>Prediction target: {item.targetDate}</p></div><div class="historical-risk {item.riskLevel}"><strong>{Math.round(item.probability * 100)}%</strong><span>{item.riskLevel}</span></div></article>
@@ -219,7 +230,7 @@
 				{#if !linkedPhone}<div class="offline-callout glass"><Phone size={22}/><div><strong>Offline alerts are not active</strong><p>Link a phone number in Settings to receive SMS broadcasts when you do not have internet access.</p></div><button on:click={() => activeTab = 'settings'}>Link phone</button></div>{/if}
 				<div class="notification-list" aria-live="polite">
 					{#each (authState.authenticated ? userNotifications.map((n) => ({ timestamp: n.created_at, probability: n.probability, alertLevel: n.current_level, locationName: n.location_name, confidence: n.direction })) : activeAlerts.flatMap((a) => a.updates.map((u) => ({ ...u, locationName: a.locationName })))).sort((a,b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 20) as item}
-						<article class="notification glass"><span class="notification-mark {item.alertLevel}"><Bell size={18}/></span><div><strong>{item.locationName}: {item.alertLevel}</strong><p>{Math.round(item.probability * 100)}% probability · {typeof item.confidence === 'number' ? `${item.confidence}% observed-data completeness` : item.confidence}</p><small>{new Date(item.timestamp).toLocaleString()}</small></div></article>
+						<article class="notification glass"><span class="notification-mark {item.alertLevel}"><Bell size={18}/></span><div><strong>{item.locationName}: {item.alertLevel}</strong><p>{Math.round(item.probability * 100)}% chance of dusty conditions · {typeof item.confidence === 'number' ? `${item.confidence}% of recent weather readings received` : item.confidence}</p><small>{new Date(item.timestamp).toLocaleString()}</small></div></article>
 					{:else}<div class="empty glass"><Bell size={28}/><h2>No broadcasts yet</h2><p>New risk-level changes will be recorded here.</p></div>{/each}
 				</div>
 			</section>
@@ -227,7 +238,7 @@
 			<section class="utility-page settings-page">
 				<div class="subpage-head"><div><p class="eyebrow">Personalisation</p><h1>Settings</h1><p>Your phone number is the only personal information SahelWatch needs.</p></div></div>
 				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is your unique account ID. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button><button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{/if}{#if phoneMessage}<p class="form-message" role="status" aria-live="polite">{phoneMessage}</p>{/if}</section>
-				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a><button class="danger-row" disabled={settingsBusy || !authState.authenticated} on:click={removeAccount}><Trash2 size={17}/>Delete account and alert records</button></section>
+				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a><button class="danger-row" disabled={settingsBusy || !authState.authenticated} on:click={() => { deleteError=''; showDeleteConfirm=true; }}><Trash2 size={17}/>Delete account and alert records</button></section>
 			</section>
 		{/if}
 	</main>
@@ -235,6 +246,7 @@
 </div>
 
 <style>
+	.modal-scrim{position:fixed;z-index:1200;inset:0;padding:20px;display:grid;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(12px)}.confirm-card{width:min(440px,100%);padding:28px;border:1px solid var(--border);border-radius:28px;color:var(--text);background:var(--surface-solid);box-shadow:var(--shadow-lg)}.confirm-icon{width:48px;height:48px;display:grid;place-items:center;border-radius:16px;color:var(--red);background:color-mix(in srgb,var(--red) 12%,transparent)}.confirm-card h2{margin:18px 0 10px}.confirm-card p{color:var(--text-secondary);line-height:1.6}.confirm-card .delete-error{padding:10px 12px;border-radius:12px;color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent)}.confirm-card>div{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:10px}.confirm-card button{min-height:48px;border:0;border-radius:15px;font-weight:700;cursor:pointer}.delete-confirm{color:white;background:var(--red)}.forecast-wait{max-width:760px}.forecast-wait h1{margin-bottom:28px}.progress-track{width:min(520px,100%);height:12px;overflow:hidden;border-radius:999px;background:var(--surface-muted)}.progress-track span{height:100%;display:block;border-radius:inherit;background:var(--blue);transition:width .35s ease}.forecast-wait>strong{margin-top:10px;display:block;color:var(--text-secondary);font-size:.85rem;font-variant-numeric:tabular-nums}
 	.critical-banner{position:sticky;z-index:40;top:8px;margin-bottom:8px;padding:12px 16px;display:flex;align-items:center;gap:10px;border-radius:16px;color:white;background:var(--red);box-shadow:var(--shadow-md)}.critical-banner button{margin-left:auto;min-height:44px;padding:0 14px;border:1px solid rgba(255,255,255,.45);border-radius:14px;color:white;background:rgba(255,255,255,.12);cursor:pointer}.threshold-field{margin-top:20px;display:grid;gap:8px;color:var(--text-secondary);font-size:.8rem;font-weight:600}.threshold-field select{min-height:48px;padding:0 14px;border:1px solid var(--border);border-radius:14px;color:var(--text);background:var(--surface-solid)}.map-loading{height:100%;display:grid;place-items:center;color:var(--text-secondary)}
 	.splash{position:fixed;z-index:1100;inset:0;display:grid;place-content:center;justify-items:center;background:var(--bg);color:var(--text)}.splash span{width:74px;height:74px;display:grid;place-items:center;border-radius:24px;color:white;background:var(--blue);box-shadow:0 22px 50px rgba(0,122,255,.25)}.splash strong{margin-top:18px;font-size:1.55rem;letter-spacing:-.04em}.splash small{margin-top:6px;color:var(--text-secondary)}
 	.app-shell { width: min(1480px, calc(100% - 28px)); margin: 0 auto; padding: 14px 0 28px; }

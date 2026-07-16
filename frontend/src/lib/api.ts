@@ -84,7 +84,9 @@ export async function getLatestPrediction(location: Location): Promise<Predictio
 	const x = d.prediction;
 	return { lat: x.lat, lon: x.lon, locationName: x.location_name, probability: x.probability,
 		riskLevel: x.alert_level, dustEvent: x.dust_event, predictionDate: x.target_date,
-		dataSource: x.data_source, available: true };
+		dataSource: x.data_source, available: true,
+		surfaceData: d.surface_data ? { soilMoisture: d.surface_data.soil_moisture, vegetationWaterContent: d.surface_data.vegetation_water_content, aod: d.surface_data.prev_day_aod } : undefined,
+		inputQuality: d.evidence?.raw_payload?.input_quality ? { degraded: d.evidence.raw_payload.input_quality.degraded, warning: d.evidence.raw_payload.input_quality.warning, fields: d.evidence.raw_payload.input_quality } : undefined };
 }
 
 export async function getCurrentConditions(location: Location) {
