@@ -169,6 +169,9 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
     sm = _extract_soil_moisture(raw_data, target_date)
     vwc = 0.0
     prev_aod = 0.0
+    smap_observed_at = None
+    aod_observed_at = None
+    soil_source = "open-meteo-forecast"
 
     if GEE_AVAILABLE:
         for offset in range(0, 8):
@@ -179,6 +182,8 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
             if sm_gee is not None:
                 sm = sm_gee
                 vwc = vwc_gee if vwc_gee is not None else 0.0
+                smap_observed_at = smap_date.strftime("%Y-%m-%d")
+                soil_source = "smap"
                 break
 
         for offset in range(1, 8):
@@ -188,6 +193,7 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
             )
             if aod > 0:
                 prev_aod = aod
+                aod_observed_at = aod_date.strftime("%Y-%m-%d")
                 break
 
     month = target_date.month
@@ -326,6 +332,14 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
         "current_conditions": conditions,
         "explanation": _explain_prediction(current_prob, conditions),
         "explanation_method": "rule-based summary of model inputs; not causal feature attribution",
+        "input_quality": {
+            "degraded": smap_observed_at is None or aod_observed_at is None,
+            "atmospheric": {"source": "open-meteo", "available": True},
+            "soil_moisture": {"source": soil_source, "observed_at": smap_observed_at, "available": True},
+            "vegetation_water_content": {"source": "smap" if smap_observed_at else None, "observed_at": smap_observed_at, "available": smap_observed_at is not None},
+            "previous_day_aod": {"source": "modis" if aod_observed_at else None, "observed_at": aod_observed_at, "available": aod_observed_at is not None},
+            "warning": "One or more expected satellite observations were unavailable; fallback model values were used." if smap_observed_at is None or aod_observed_at is None else None,
+        },
         "history": history["updates"],
         "alert_message": alert_message,
     }

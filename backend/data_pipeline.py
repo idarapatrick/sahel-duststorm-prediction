@@ -14,17 +14,35 @@ GEE provides SMAP and MODIS data with a 2-7 day lag.
 import asyncio
 import json
 import math
+import os
 import numpy as np
 import requests
 from datetime import datetime, timedelta, timezone
 
 try:
     import ee
-    ee.Initialize(project='sahel-dust-forecasting')
+    from google.oauth2 import service_account
+
+    gee_project = os.getenv("GEE_PROJECT_ID", "sahel-dust-forecasting").strip()
+    gee_credentials_json = os.getenv("GEE_SERVICE_ACCOUNT_JSON", "").strip()
+    if gee_credentials_json:
+        credentials_info = json.loads(gee_credentials_json)
+        credentials = service_account.Credentials.from_service_account_info(
+            credentials_info,
+            scopes=[
+                "https://www.googleapis.com/auth/earthengine",
+                "https://www.googleapis.com/auth/cloud-platform",
+            ],
+        )
+        ee.Initialize(credentials=credentials, project=gee_project)
+    else:
+        # Supports local `earthengine authenticate` and Render secret files via
+        # GOOGLE_APPLICATION_CREDENTIALS=/etc/secrets/<filename>.json.
+        ee.Initialize(project=gee_project)
     GEE_AVAILABLE = True
-except Exception:
+except Exception as exc:
     GEE_AVAILABLE = False
-    print("Google Earth Engine not available. Using Open-Meteo for all data.")
+    print(f"Google Earth Engine not available ({type(exc).__name__}). Using satellite fallbacks.")
 
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
@@ -106,6 +124,17 @@ async def fetch_current_conditions(lat: float, lon: float) -> dict:
 
 def get_location_name(lat: float, lon: float) -> str:
     """Reverse geocode coordinates to a place name using OpenStreetMap Nominatim."""
+    covered = [
+        (13.51, 2.11, "Niamey, Niger"), (13.06, 5.24, "Sokoto, Nigeria"),
+        (12.00, 8.52, "Kano, Nigeria"), (11.85, 13.16, "Maiduguri, Nigeria"),
+        (16.97, 7.99, "Agadez, Niger"), (12.13, 15.06, "N'Djamena, Chad"),
+        (12.64, -8.00, "Bamako, Mali"), (16.77, -3.01, "Timbuktu, Mali"),
+        (12.36, -1.48, "Ouagadougou, Burkina Faso"), (14.69, -17.44, "Dakar, Senegal"),
+        (18.09, -15.98, "Nouakchott, Mauritania"),
+    ]
+    nearest = min(covered, key=lambda item: (item[0] - lat) ** 2 + (item[1] - lon) ** 2)
+    if abs(nearest[0] - lat) <= 0.08 and abs(nearest[1] - lon) <= 0.08:
+        return nearest[2]
     try:
         response = requests.get(
             "https://nominatim.openstreetmap.org/reverse",
@@ -350,6 +379,19 @@ async def fetch_features(lat: float, lon: float) -> tuple[list, list, str]:
     )
 
 
+async def fetch_features_detailed(lat: float, lon: float) -> tuple[list, list, str, dict]:
+    """Fetch model inputs with field-level source, timestamp and missingness."""
+    loop = asyncio.get_event_loop()
+    for days_back in range(0, 11):
+        date = datetime.now(timezone.utc) - timedelta(days=days_back)
+        try:
+            atmospheric, surface, provenance = await _build_features_with_provenance(lat, lon, date, loop)
+            return atmospheric, surface, date.strftime("%Y-%m-%d"), provenance
+        except RuntimeError:
+            continue
+    raise RuntimeError(f"Could not fetch data for {lat:.3f}N, {lon:.3f}E (checked last 10 days)")
+
+
 async def fetch_features_for_date(
     lat: float, lon: float, date: datetime
 ) -> tuple[list, list, str]:
@@ -381,6 +423,11 @@ async def fetch_forecast(lat: float, lon: float, days_ahead: int = 3) -> list:
 
 
 async def _build_features(lat, lon, date, loop):
+    atmospheric, surface, _ = await _build_features_with_provenance(lat, lon, date, loop)
+    return atmospheric, surface
+
+
+async def _build_features_with_provenance(lat, lon, date, loop):
     raw_data = await loop.run_in_executor(
         None, _fetch_openmeteo_forecast, lat, lon, date
     )
@@ -388,6 +435,9 @@ async def _build_features(lat, lon, date, loop):
 
     sm = None
     vwc = 0.0
+    smap_observed_at = None
+    sm_source = "open-meteo-forecast"
+    vwc_available = False
 
     if GEE_AVAILABLE:
         for smap_offset in range(0, 8):
@@ -398,6 +448,9 @@ async def _build_features(lat, lon, date, loop):
             if sm_try is not None:
                 sm = sm_try
                 vwc = vwc_try if vwc_try is not None else 0.0
+                smap_observed_at = smap_date.strftime("%Y-%m-%d")
+                sm_source = "smap"
+                vwc_available = vwc_try is not None
                 break
 
     if sm is None:
@@ -405,6 +458,7 @@ async def _build_features(lat, lon, date, loop):
         vwc = 0.0
 
     prev_aod = 0.0
+    aod_observed_at = None
     if GEE_AVAILABLE:
         for aod_offset in range(1, 8):
             aod_date = date - timedelta(days=aod_offset)
@@ -412,6 +466,7 @@ async def _build_features(lat, lon, date, loop):
                 None, _fetch_modis_aod_gee, lat, lon, aod_date
             )
             if prev_aod > 0:
+                aod_observed_at = aod_date.strftime("%Y-%m-%d")
                 break
 
     month = date.month
@@ -420,7 +475,16 @@ async def _build_features(lat, lon, date, loop):
 
     surface = [sm, vwc, prev_aod, lat, lon, month_sin, month_cos]
 
-    return atmospheric, surface
+    provenance = {
+        "atmospheric": {"source": "open-meteo", "reference_date": date.strftime("%Y-%m-%d"), "available": True},
+        "soil_moisture": {"source": sm_source, "observed_at": smap_observed_at, "available": sm is not None},
+        "vegetation_water_content": {"source": "smap" if vwc_available else None, "observed_at": smap_observed_at if vwc_available else None, "available": vwc_available},
+        "previous_day_aod": {"source": "modis" if aod_observed_at else None, "observed_at": aod_observed_at, "available": aod_observed_at is not None},
+    }
+    provenance["degraded"] = not all(
+        provenance[name]["available"] for name in ("atmospheric", "soil_moisture", "vegetation_water_content", "previous_day_aod")
+    )
+    return atmospheric, surface, provenance
 
 
 def save_payload_for_swagger(lat, lon, date, filename="swagger_payload.json"):

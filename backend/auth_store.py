@@ -151,6 +151,14 @@ def verify_otp(challenge_id: str, code: str, preferred_location: dict[str, Any] 
                    VALUES (%s,%s,%s,%s,%s,%s)""",
                 (phone_uid, _country_calling_code(phone_uid), now, location.get("lat"), location.get("lon"), location.get("name")),
             )
+            if location.get("lat") is not None and location.get("lon") is not None:
+                connection.execute(
+                    """INSERT INTO alert_subscriptions
+                       (phone_uid,lat,lon,location_name,threshold)
+                       VALUES (%s,%s,%s,%s,'warning')
+                       ON CONFLICT(phone_uid,lat,lon) DO NOTHING""",
+                    (phone_uid, location["lat"], location["lon"], location.get("name") or "Preferred location"),
+                )
         connection.execute("UPDATE otp_challenges SET consumed_at=%s WHERE id=%s", (now, challenge_id))
         token = secrets.token_urlsafe(48)
         expires = now + timedelta(days=SESSION_DAYS)
@@ -189,3 +197,24 @@ def revoke_session(token: str | None) -> None:
     if token:
         with _postgres_connection() as connection:
             connection.execute("UPDATE user_sessions SET revoked_at=now() WHERE token_hash=%s", (_token_hash(token),))
+
+
+def require_session(token: str | None) -> dict[str, Any]:
+    user = session_user(token)
+    if not user:
+        raise AuthError(401, "Log in to manage this phone account")
+    return user
+
+
+def delete_account(token: str | None) -> None:
+    user = require_session(token)
+    with _postgres_connection() as connection:
+        connection.execute("DELETE FROM alert_deliveries WHERE phone_uid=%s", (user["phone_uid"],))
+        connection.execute("DELETE FROM sms_messages WHERE phone_uid=%s", (user["phone_uid"],))
+        connection.execute("DELETE FROM otp_challenges WHERE phone_uid=%s", (user["phone_uid"],))
+        connection.execute("DELETE FROM known_devices WHERE phone_uid=%s", (user["phone_uid"],))
+        connection.execute("DELETE FROM alert_identities WHERE phone_uid=%s", (user["phone_uid"],))
+
+
+async def send_alert_sms(phone_uid: str, message: str) -> str | None:
+    return await _send_sms(phone_uid, message)
