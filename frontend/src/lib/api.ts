@@ -75,7 +75,8 @@ export async function getPrediction(location: Location): Promise<Prediction> {
 			soilMoisture: d.surface_data.soil_moisture,
 			vegetationWaterContent: d.surface_data.vegetation_water_content,
 			aod: d.surface_data.prev_day_aod
-		} : undefined
+		} : undefined,
+		inputQuality: d.input_quality ? { degraded: d.input_quality.degraded, warning: d.input_quality.warning } : undefined
 	};
 }
 
@@ -101,7 +102,8 @@ export async function getProgressiveEvidence(location: Location): Promise<Progre
 			surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm,
 			dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture,
 			vegetationWaterContent: c.vegetation_water_content, aod: c.aod
-		} : undefined
+		} : undefined,
+		inputQuality: d.input_quality ? { degraded: d.input_quality.degraded, warning: d.input_quality.warning } : undefined
 	};
 }
 

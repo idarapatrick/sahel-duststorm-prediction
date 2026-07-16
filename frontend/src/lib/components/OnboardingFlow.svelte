@@ -17,6 +17,7 @@
 	let challengeId = '';
 	let busy = false;
 	let message = '';
+	$: phoneValid = /^\+[1-9][0-9]{9,14}$/.test(phone.trim());
 
 	function chooseLocation() { step = 'phone-choice'; message = ''; }
 	function finish(phoneUid?: string) { dispatch('complete', { location: selected, phoneUid }); }
@@ -37,6 +38,7 @@
 	}
 
 	async function sendCode() {
+		if (!phoneValid) { message = 'Use international format starting with +, for example +2348012345678.'; return; }
 		busy = true; message = '';
 		try {
 			const result = await requestOtp(phone, purpose, deviceId);
@@ -77,14 +79,14 @@
 		{:else if step === 'phone'}
 			<button class="back" aria-label="Back" on:click={() => { step='phone-choice'; message=''; }}><ArrowLeft size={19}/></button>
 			<p class="step">{purpose === 'signup' ? 'Create phone account' : 'Secure login'}</p><h1 id="onboarding-title">Enter your phone number</h1>
-			<p class="intro">Include the country code. Your number becomes your unique SahelWatch account ID.</p>
-			<label for="phone">Phone number with country code</label><input id="phone" type="tel" autocomplete="tel" bind:value={phone} placeholder="2348012345678" />
+			<p class="intro">Use international E.164 format beginning with +. Your verified number becomes your unique SahelWatch account ID.</p>
+			<label for="phone">International phone number</label><input id="phone" type="tel" autocomplete="tel" bind:value={phone} placeholder="+2348012345678" aria-describedby="phone-help" on:blur={() => { if (phone && !phoneValid) message='Use international format starting with +, for example +2348012345678.'; }} /><small id="phone-help" class="helper">Include +, country code and subscriber number. Do not start with a local 0.</small>
 			{#if message}<p class="message error" role="alert">{message}</p>{/if}
-			<button class="primary" disabled={busy} on:click={sendCode}>{busy ? 'Sending code…' : 'Send verification code'}<ArrowRight size={18}/></button>
+			<button class="primary" disabled={busy || !phoneValid} on:click={sendCode}>{busy ? 'Sending code…' : 'Send verification code'}<ArrowRight size={18}/></button>
 		{:else}
 			<button class="back" aria-label="Back" on:click={() => { step='phone'; code=''; message=''; }}><ArrowLeft size={19}/></button>
 			<p class="step">Verification</p><h1 id="onboarding-title">Check your messages</h1>
-			<p class="intro">Enter the six-digit code sent to +{phone.replace(/\D/g,'')}. It expires after 10 minutes.</p>
+			<p class="intro">Enter the six-digit code sent to {phone}. It expires after 10 minutes.</p>
 			<label for="otp">Verification code</label><input id="otp" class="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={code} placeholder="000000" />
 			{#if message}<p class="message error" role="alert">{message}</p>{/if}
 			<button class="primary" disabled={busy || code.length !== 6} on:click={confirmCode}>{busy ? 'Verifying…' : 'Verify and continue'}<Check size={18}/></button>
@@ -99,6 +101,7 @@
 	.brand{display:flex;align-items:center;gap:9px;font-weight:760}.brand span{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;color:white;background:var(--blue)}
 	.step{margin:38px 0 8px;color:var(--blue);font-size:.72rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em}h1{margin:0;font-size:clamp(2rem,7vw,3.1rem);line-height:1.02;letter-spacing:-.055em}.intro{margin:16px 0 26px;color:var(--text-secondary);line-height:1.6}
 	label{display:block;margin:20px 0 8px;font-size:.78rem;font-weight:700}select,input{width:100%;min-height:52px;padding:0 15px;border:1px solid var(--border);border-radius:16px;color:var(--text);background:var(--surface-solid);font-size:1rem}.otp{font-size:1.5rem;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums}
+	.helper{display:block;margin:7px 3px 0;color:var(--text-tertiary);font-size:.72rem;line-height:1.45}
 	button{min-height:48px;border:0;border-radius:16px;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.primary,.secondary,.locate,.text{width:100%;margin-top:12px}.primary{display:flex;align-items:center;justify-content:center;gap:8px;color:white;background:var(--blue)}.secondary,.locate{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--text);background:var(--surface-muted)}.locate{margin-bottom:18px}.text{color:var(--text-secondary);background:transparent}.back,.close{position:absolute;top:24px;width:44px;background:var(--surface-muted)}.back{right:24px}.close{right:24px}.benefit{padding:16px;display:flex;gap:12px;border-radius:18px;background:var(--surface-muted)}.benefit p{margin:5px 0 0;color:var(--text-secondary);font-size:.8rem;line-height:1.45}.message{margin:12px 0 0;color:var(--text-secondary);font-size:.82rem}.error{color:var(--red)}.privacy{margin:24px 0 0;color:var(--text-tertiary);font-size:.72rem;line-height:1.5}.privacy a{color:var(--blue)}
 	@media(prefers-reduced-motion:no-preference){.sheet{animation:enter .25s ease-out}@keyframes enter{from{opacity:0;transform:translateY(14px) scale(.98)}}}
 </style>

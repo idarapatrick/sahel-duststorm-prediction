@@ -10,6 +10,7 @@ export interface Prediction {
 	dustEvent: boolean; predictionDate: string; dataSource: string;
 	conditions?: Conditions;
 	surfaceData?: { soilMoisture: number; vegetationWaterContent: number; aod: number };
+	inputQuality?: { degraded: boolean; warning?: string };
 }
 export interface HistoricalSnapshot extends Prediction {
 	id: string; recordedAt: string; targetDate: string; modelVersion?: string; source: 'live' | 'demo';
@@ -35,4 +36,5 @@ export interface ProgressiveEvidence {
 	confidencePct: number; observedHours: number; forecastHours: number; trend: string;
 	soilMoisture: number; vegetationWaterContent: number; aod: number; message: string;
 	conditions?: Conditions;
+	inputQuality?: { degraded: boolean; warning?: string };
 }
