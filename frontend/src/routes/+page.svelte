@@ -4,7 +4,7 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import OnboardingFlow from '$lib/components/OnboardingFlow.svelte';
 	import { DEFAULT_LOCATION, locations } from '$lib/locations';
-	import { deleteAccount, demoPrediction, getActiveAlerts, getAuthState, getCurrentConditions, getHistory, getLatestPrediction, getNotifications, getPrediction, getRecentHistory, logout, saveAlertSubscription } from '$lib/api';
+	import { confirmAccountDeletion, demoPrediction, getActiveAlerts, getAuthState, getCurrentConditions, getHistory, getLatestPrediction, getNotifications, getPrediction, getRecentHistory, logout, requestAccountDeletionOtp, saveAlertSubscription } from '$lib/api';
 	import type { ActiveAlert, AuthState, DailyHorizonResponse, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence } from '$lib/types';
 
 	let selected = DEFAULT_LOCATION;
@@ -20,6 +20,9 @@
 	let settingsBusy = false;
 	let showDeleteConfirm = false;
 	let deleteError = '';
+	let deleteChallengeId = '';
+	let deleteCode = '';
+	let deleteStep: 'confirm' | 'otp' = 'confirm';
 	let PredictionMapComponent: any = null;
 	let linkedPhone = '';
 	let phoneMessage = '';
@@ -49,8 +52,9 @@
 	$: conditions = dailyHorizons?.conditions || progressive?.conditions || prediction.conditions;
 
 	async function loadLocation(location: Location) {
+		const previousPrediction = selected.name === location.name && prediction.available !== false ? prediction : null;
 		selected = location; loading = true; forecastProgress = 8; history = []; historyMessage = '';
-		prediction = demoPrediction(location);
+		if (!previousPrediction) prediction = demoPrediction(location);
 		if (progressTimer) clearInterval(progressTimer);
 		progressTimer = setInterval(() => forecastProgress = Math.min(82, forecastProgress + (forecastProgress < 45 ? 7 : 3)), 450);
 		const latestRequest = getLatestPrediction(location).then((value) => { forecastProgress = Math.max(forecastProgress, 72); return value; });
@@ -64,7 +68,7 @@
 				prediction = { ...prediction, conditions: { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: prediction.surfaceData?.vegetationWaterContent ?? 0, aod: prediction.surfaceData?.aod ?? 0 } };
 			}
 			online = true;
-		} catch { prediction = demoPrediction(location); online = false; }
+		} catch { prediction = previousPrediction || demoPrediction(location); online = false; }
 		progressive = null;
 		dailyHorizons = null;
 		forecastProgress = 100; if (progressTimer) clearInterval(progressTimer);
@@ -90,11 +94,22 @@
 		catch (error) { phoneMessage = error instanceof Error ? error.message : 'Could not save alert preference.'; }
 		finally { settingsBusy = false; }
 	}
-	async function removeAccount() {
+	async function sendDeleteCode() {
 		settingsBusy = true; deleteError = '';
-		try { await deleteAccount(); authState = { authenticated: false }; linkedPhone = ''; showDeleteConfirm = false; phoneMessage = 'Your phone account and alert records were deleted.'; }
+		try { const result = await requestAccountDeletionOtp(deviceId); deleteChallengeId = result.challenge_id; deleteStep = 'otp'; }
+		catch (error) { deleteError = error instanceof Error ? error.message : 'We could not send the verification code. Please try again.'; }
+		finally { settingsBusy = false; }
+	}
+	async function removeAccount() {
+		if (!/^\d{6}$/.test(deleteCode)) { deleteError = 'Enter the six-digit code sent to your phone.'; return; }
+		settingsBusy = true; deleteError = '';
+		try { await confirmAccountDeletion(deleteChallengeId, deleteCode); authState = { authenticated: false }; linkedPhone = ''; showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; phoneMessage = 'Your phone account and alert records were deleted.'; }
 		catch (error) { deleteError = error instanceof Error ? error.message : 'We could not delete the account. Please try again.'; }
 		finally { settingsBusy = false; }
+	}
+	function closeDeleteDialog() {
+		if (settingsBusy) return;
+		showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; deleteError = '';
 	}
 
 	async function signOut() {
@@ -120,6 +135,7 @@
 	async function loadRecentHistory() { try { recentHistory = await getRecentHistory(selected, 10); } catch { recentHistory = []; } }
 
 	onMount(() => {
+		if (new URLSearchParams(window.location.search).get('tab') === 'settings') activeTab = 'settings';
 		import('$lib/components/PredictionMap.svelte').then((module) => PredictionMapComponent = module.default);
 		deviceId = localStorage.getItem('sahelwatch:device_id') || crypto.randomUUID(); localStorage.setItem('sahelwatch:device_id', deviceId);
 		const savedLocation = localStorage.getItem('sahelwatch:location');
@@ -135,8 +151,8 @@
 </script>
 
 <svelte:head>
-	<title>SahelWatch — Dust intelligence, hours ahead</title>
-	<meta name="description" content="AI-powered dust and sand-storm forecasts for communities across the Sahel." />
+	<title>SahelWatch | Dust outlooks for the Sahel</title>
+	<meta name="description" content="Dust and sand-storm outlooks for communities across the Sahel." />
 </svelte:head>
 
 {#if showSplash}
@@ -145,7 +161,7 @@
 	<OnboardingFlow {deviceId} initialLocation={selected} on:complete={finishOnboarding}/>
 {/if}
 {#if showAuth}<OnboardingFlow {deviceId} initialLocation={selected} authOnly on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
-{#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span><h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">Your phone number, sign-ins, SMS choices and alert records will be permanently removed. This cannot be undone.</p>{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={() => showDeleteConfirm=false}>Keep account</button><button class="delete-confirm" disabled={settingsBusy} on:click={removeAccount}>{settingsBusy ? 'Deleting…' : 'Delete permanently'}</button></div></section></div>{/if}
+{#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span>{#if deleteStep === 'confirm'}<h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">Your phone number, sign-ins, SMS choices and alert records will be permanently removed. We will send a code to +{linkedPhone} before anything is deleted.</p>{:else}<h2 id="delete-title">Enter the code from your phone</h2><p id="delete-description">Enter the six-digit code sent to +{linkedPhone}. Your account will be deleted only after the code is accepted.</p><label for="delete-code">Verification code</label><input id="delete-code" class="delete-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={deleteCode} placeholder="000000" />{/if}{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={closeDeleteDialog}>Keep account</button>{#if deleteStep === 'confirm'}<button class="delete-confirm" disabled={settingsBusy} on:click={sendDeleteCode}>{settingsBusy ? 'Sending code...' : 'Send code'}</button>{:else}<button class="delete-confirm" disabled={settingsBusy || deleteCode.length !== 6} on:click={removeAccount}>{settingsBusy ? 'Deleting...' : 'Verify and delete'}</button>{/if}</div></section></div>{/if}
 
 <div class="app-shell">
 	{#if prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
@@ -175,7 +191,7 @@
 					{/if}
 				</div>
 				<div class="risk-orb {riskTone}" style={`--value:${prediction.available === false ? 0 : prediction.probability}`} aria-label={prediction.available === false ? 'Prediction unavailable' : `${probability} percent dust-storm probability`}>
-					<div><span>{loading || prediction.available === false ? '—' : probability}</span>{#if prediction.available !== false}<small>%</small>{/if}<p>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</p></div>
+					<div><span>{loading || prediction.available === false ? 'Not available' : probability}</span>{#if prediction.available !== false}<small>%</small>{/if}<p>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</p></div>
 				</div>
 			</section>
 
@@ -193,13 +209,13 @@
 
 			<section class="forecast-strip glass">
 				<div><p class="eyebrow">Next update</p><strong>Continuous monitoring</strong><small>The server worker refreshes evidence every six hours without requiring this browser.</small></div>
-				<div class="day"><span>Current target</span><strong>{prediction.available === false ? '—' : `${probability}%`}</strong><small>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</small></div><div class="day"><span>Day+1</span><strong>—</strong><small>Coming soon</small></div><div class="day"><span>Day+2</span><strong>—</strong><small>Coming soon</small></div>
+				<div class="day"><span>Current target</span><strong>{prediction.available === false ? 'N/A' : `${probability}%`}</strong><small>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</small></div><div class="day"><span>Day+1</span><strong>N/A</strong><small>Coming soon</small></div><div class="day"><span>Day+2</span><strong>N/A</strong><small>Coming soon</small></div>
 			</section>
 
 		{:else if activeTab === 'tracking'}
 			<section class="subpage-head"><div><p class="eyebrow">Tracking</p><h1>Monitor {selected.name}</h1><p>Inspect the current risk and predicted 24–48 hour window.</p></div><select bind:value={selected} on:change={() => loadLocation(selected)} aria-label="Tracking location">{#each locations as location}<option value={location}>{location.name}, {location.country}</option>{/each}</select></section>
 			<div class="horizon-coming-soon" aria-disabled="true">
-				<div class="horizon-picker glass" aria-label="Daily prediction horizons — coming soon">
+				<div class="horizon-picker glass" aria-label="Daily prediction horizons, coming soon">
 					{#each dailyHorizonNames as day}<button disabled={multiHorizonComingSoon || !dailyHorizons} title="Future daily outlooks are coming soon" class:active={!multiHorizonComingSoon && Boolean(dailyHorizons) && selectedHorizon === day} on:click={() => selectedHorizon = day}>{day}</button>{/each}
 				</div>
 				<span>Coming soon</span>
@@ -211,7 +227,7 @@
 
 		{:else if activeTab === 'history'}
 			<section class="history-page">
-				<div class="subpage-head"><div><p class="eyebrow">90-day archive</p><h1>Look back with context</h1><p>Search prediction snapshots that SahelWatch actually recorded—never reconstructed or invented conditions.</p></div></div>
+				<div class="subpage-head"><div><p class="eyebrow">90-day archive</p><h1>Look back with context</h1><p>Search prediction snapshots that SahelWatch actually recorded. Conditions are never reconstructed or invented.</p></div></div>
 				{#if recentHistory.length}<div class="recent-history"><p class="eyebrow">Last 10 predictions for {selected.name}</p>{#each recentHistory as item}<article class="history-result glass"><div><strong>{new Date(item.recordedAt).toLocaleString()}</strong><p>Target {item.targetDate}</p></div><div class="historical-risk {item.riskLevel}"><strong>{Math.round(item.probability * 100)}%</strong><span>{item.riskLevel}</span></div></article>{/each}</div>{/if}
 				<form class="history-form glass" on:submit|preventDefault={searchHistory}>
 					<label><span>Covered location</span><select bind:value={selected}>{#each locations as location}<option value={location}>{location.name}, {location.country}</option>{/each}</select></label>
@@ -238,7 +254,7 @@
 			<section class="utility-page settings-page">
 				<div class="subpage-head"><div><p class="eyebrow">Personalisation</p><h1>Settings</h1><p>Your phone number is the only personal information SahelWatch needs.</p></div></div>
 				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is your unique account ID. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button><button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{/if}{#if phoneMessage}<p class="form-message" role="status" aria-live="polite">{phoneMessage}</p>{/if}</section>
-				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a><button class="danger-row" disabled={settingsBusy || !authState.authenticated} on:click={() => { deleteError=''; showDeleteConfirm=true; }}><Trash2 size={17}/>Delete account and alert records</button></section>
+				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a>{#if authState.authenticated}<button class="danger-row" disabled={settingsBusy} on:click={() => { deleteError=''; deleteStep='confirm'; showDeleteConfirm=true; }}><Trash2 size={17}/>Delete account and alert records</button>{/if}</section>
 			</section>
 		{/if}
 	</main>
@@ -293,4 +309,5 @@
 		.offline-callout { grid-template-columns: auto 1fr; }.offline-callout button { grid-column: 1 / -1; }
 		.phone-field { align-items: stretch; flex-wrap: wrap; }.phone-field input { min-height: 48px; }.phone-field button { width: 100%; min-height: 48px; justify-content: center; }
 	}
+	.confirm-card label{display:block;margin:18px 0 8px;font-size:.8rem;font-weight:700}.delete-code{width:100%;min-height:52px;padding:0 14px;border:1px solid var(--border);border-radius:15px;color:var(--text);background:var(--surface-muted);font-size:1.35rem;letter-spacing:.25em;text-align:center}
 </style>

@@ -35,14 +35,14 @@
 		</label>
 		{#if open}
 			<div class="results glass">
-				{#each filtered.slice(0, 6) as location}
+				{#each filtered as location}
 					<button on:click={() => choose(location)}><span>{location.name}</span><small>{location.country}</small></button>
 				{:else}<p>No covered city found</p>{/each}
 			</div>
 		{/if}
 	</div>
 	<div class="actions">
-		<div class="status" title={online ? 'Live backend connected' : 'Showing demonstration snapshot'}><i class:offline={!online}></i><span>{online ? 'AI monitoring' : 'Demo data'}</span></div>
+		<div class="status" title={online ? 'Live updates connected' : 'Live updates unavailable'}><i class:offline={!online}></i><span>{online ? 'Live updates' : 'Updates offline'}</span></div>
 		<button class="location" on:click={() => open = !open} aria-expanded={open}><span>{selected.name}</span><ChevronDown size={16} /></button>
 		<button class="icon" on:click={toggleTheme} aria-label={dark ? 'Use light theme' : 'Use dark theme'}>{#if dark}<Sun size={20} />{:else}<Moon size={20} />{/if}</button>
 	</div>
@@ -59,7 +59,7 @@
 	.search { height: 44px; padding: 0 14px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-tertiary); background: var(--surface-muted); }
 	.search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--ring); }
 	.search input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: .86rem; }
-	.results { position: absolute; top: 52px; width: 100%; padding: 8px; border-radius: 20px; }
+	.results { position: absolute; top: 52px; width: 100%; max-height: min(420px, 65vh); padding: 8px; overflow-y: auto; overscroll-behavior: contain; border-radius: 20px; }
 	.results button { width: 100%; min-height: 46px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; border: 0; border-radius: 13px; background: transparent; cursor: pointer; }
 	.results button:hover { background: var(--surface-muted); }
 	.results small, .results p { color: var(--text-secondary); }

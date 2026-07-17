@@ -2,7 +2,7 @@ import { env } from '$env/dynamic/public';
 import type { ActiveAlert, AuthState, DailyHorizonResponse, Forecast, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence, RiskLevel } from './types';
 
 const base = (env.PUBLIC_API_BASE_URL || 'https://saheldust-backend.onrender.com').replace(/\/$/, '');
-const timeoutMs = 45_000;
+const timeoutMs = 75_000;
 
 function alertLevel(probability: number): RiskLevel {
 	if (probability >= .7) return 'alert';
@@ -55,14 +55,13 @@ export async function getAuthState(): Promise<AuthState> {
 
 export async function logout() { return postJson('/api/v1/auth/logout'); }
 
-async function deleteJson(path: string) {
-	const response = await fetch(`${base}${path}`, { method: 'DELETE', credentials: 'include' });
-	const payload = await response.json().catch(() => ({}));
-	if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
-	return payload;
+export async function requestAccountDeletionOtp(deviceId: string) {
+	return postJson('/api/v1/auth/account/delete-otp', { device_id: deviceId });
 }
 
-export async function deleteAccount() { return deleteJson('/api/v1/auth/account'); }
+export async function confirmAccountDeletion(challengeId: string, code: string) {
+	return postJson('/api/v1/auth/account/confirm-delete', { challenge_id: challengeId, code });
+}
 
 export async function saveAlertSubscription(location: Location, threshold: 'watch' | 'warning' | 'alert') {
 	const response = await fetch(`${base}/api/v1/subscriptions`, {
