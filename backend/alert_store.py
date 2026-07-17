@@ -17,8 +17,10 @@ LEVELS = {"clear": 0, "watch": 1, "warning": 2, "alert": 3}
 
 
 def should_deliver(threshold: str, current_level: str, direction: str) -> bool:
-    """Downgrades reach prior subscribers; upgrades respect their threshold."""
-    return direction == "downgraded" or LEVELS.get(current_level, 0) >= LEVELS[threshold]
+    """Deliver only active dust risk states that meet the user's threshold."""
+    return current_level in {"watch", "warning", "alert"} and (
+        LEVELS.get(current_level, 0) >= LEVELS[threshold]
+    )
 
 
 def list_subscriptions(phone_uid: str) -> list[dict[str, Any]]:
@@ -58,10 +60,12 @@ def delete_subscription(phone_uid: str, subscription_id: str) -> bool:
 def notification_feed(phone_uid: str, limit: int = 50) -> list[dict[str, Any]]:
     with _postgres_connection() as connection:
         rows = connection.execute(
-            """SELECT DISTINCT e.id,e.event_type,e.payload,e.status,e.created_at
+            """SELECT DISTINCT e.id,e.event_type,e.payload,e.status,e.created_at,
+                      s.location_name AS subscription_location_name
                FROM outbox_events e
                JOIN alert_subscriptions s ON s.phone_uid=%s
                WHERE e.event_type='prediction.alert_level_changed'
+                 AND e.payload->>'current_level' IN ('watch','warning','alert')
                  AND abs((e.payload->>'lat')::double precision-s.lat)<=0.05
                  AND abs((e.payload->>'lon')::double precision-s.lon)<=0.05
                ORDER BY e.created_at DESC LIMIT %s""",
@@ -70,6 +74,8 @@ def notification_feed(phone_uid: str, limit: int = 50) -> list[dict[str, Any]]:
     items = []
     for row in rows:
         payload = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
+        if not payload.get("location_name") or payload.get("location_name") == "Unknown":
+            payload["location_name"] = row["subscription_location_name"]
         items.append({
             "id": str(row["id"]), "event_type": row["event_type"], "status": row["status"],
             "created_at": row["created_at"].isoformat(), **payload,
@@ -133,6 +139,8 @@ def claim_outbox_event() -> dict[str, Any] | None:
 def matching_recipients(event: dict[str, Any]) -> list[str]:
     payload = json.loads(event["payload"]) if isinstance(event["payload"], str) else event["payload"]
     if event["event_type"] != "prediction.alert_level_changed":
+        return []
+    if payload.get("current_level") not in {"watch", "warning", "alert"}:
         return []
     with _postgres_connection() as connection:
         rows = connection.execute(

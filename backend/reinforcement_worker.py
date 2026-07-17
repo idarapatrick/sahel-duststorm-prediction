@@ -60,6 +60,8 @@ async def process_job(job: dict) -> None:
             "worker_id": WORKER_ID, "monitoring_job_id": str(job["id"]),
             "confidence": result["data_composition"]["confidence_pct"],
             "trend": result["trend"], "revision": result["update_count"],
+            "surface_data": result["surface_data"],
+            "input_quality": result["input_quality"],
         },
     })
     record_environmental_evidence(result)

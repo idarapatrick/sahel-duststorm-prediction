@@ -4,7 +4,6 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,7 +19,7 @@ from alert_tracker import progressive_predict, get_all_tracked, clear_expired
 from history_store import RETENTION_DAYS, database_status, query_latest_environmental_evidence, query_recent_snapshots, query_snapshots, save_snapshot
 from monitoring_store import ensure_monitoring_job
 from prediction_cache import build_cache_key, get_cached_prediction, try_acquire_prediction_lease
-from auth_store import AuthError, delete_account, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
+from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
 from rate_limit import RateLimitExceeded, enforce_rate_limit
 from observability import configure_logging, log_event
@@ -158,6 +157,15 @@ class OtpVerification(BaseModel):
     preferred_location: PreferredLocation | None = None
 
 
+class AccountDeletionRequest(BaseModel):
+    device_id: str | None = None
+
+
+class AccountDeletionConfirmation(BaseModel):
+    challenge_id: str
+    code: str
+
+
 class SubscriptionRequest(BaseModel):
     lat: float
     lon: float
@@ -213,6 +221,11 @@ async def health():
         "status": "ok", "database": storage,
         "earth_engine": {"available": GEE_AVAILABLE},
         "model": {"configured": bool(HF_SPACE_URL)},
+        "sms": {
+            "configured": bool(os.getenv("AFRICASTALKING_USERNAME") and os.getenv("AFRICASTALKING_API_KEY")),
+            "mode": "sandbox" if os.getenv("AFRICASTALKING_SANDBOX", "false").lower() == "true" else "live",
+            "sender_configured": bool(os.getenv("AFRICASTALKING_SENDER_ID", "").strip()),
+        },
         "operations": operations,
     }
 
@@ -261,10 +274,33 @@ async def auth_logout(response: Response, sahelwatch_session: str | None = Cooki
     return {"authenticated": False}
 
 
-@app.delete("/api/v1/auth/account")
-async def auth_delete_account(response: Response, sahelwatch_session: str | None = Cookie(default=None)):
+@app.post("/api/v1/auth/account/delete-otp")
+async def auth_request_account_deletion(
+    payload: AccountDeletionRequest,
+    request: Request,
+    sahelwatch_session: str | None = Cookie(default=None),
+):
     try:
-        delete_account(sahelwatch_session)
+        enforce_rate_limit(_request_ip(request) or "unknown", "delete-otp", 5, 3600)
+        return await request_account_deletion_otp(
+            sahelwatch_session, payload.device_id, _request_ip(request)
+        )
+    except RateLimitExceeded as exc:
+        raise HTTPException(429, "Too many verification requests", headers={"Retry-After": str(exc.retry_after)}) from exc
+    except AuthError as exc:
+        raise _auth_error(exc) from exc
+
+
+@app.post("/api/v1/auth/account/confirm-delete")
+async def auth_confirm_account_deletion(
+    payload: AccountDeletionConfirmation,
+    response: Response,
+    sahelwatch_session: str | None = Cookie(default=None),
+):
+    if not (payload.code.isdigit() and len(payload.code) == 6):
+        raise HTTPException(400, "Enter the six-digit verification code")
+    try:
+        confirm_account_deletion(sahelwatch_session, payload.challenge_id, payload.code)
     except AuthError as exc:
         raise _auth_error(exc) from exc
     response.delete_cookie("sahelwatch_session", path="/", secure=True, samesite="none")
@@ -364,7 +400,7 @@ async def predict_location(request: Request, lat: float, lon: float):
         location_name = get_location_name(lat, lon)
 
         model_started = time.monotonic()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 HF_SPACE_URL,
                 json={"atmospheric": atmospheric, "surface": surface},
@@ -533,7 +569,7 @@ async def active_alerts():
     return {
         "total_tracked": len(tracked),
         "active_alerts": len(active),
-        "predictions": tracked,
+        "predictions": active,
     }
 
 

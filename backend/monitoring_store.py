@@ -176,7 +176,8 @@ def create_alert_level_event(
     result: dict[str, Any],
 ) -> str | None:
     current_level = result["alert_level"]
-    if current_level == previous_level or (previous_level is None and current_level == "clear"):
+    # Clear conditions remain available in history but never become an alert.
+    if current_level == "clear" or current_level == previous_level:
         return None
     from psycopg.types.json import Jsonb
 

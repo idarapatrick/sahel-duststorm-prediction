@@ -282,7 +282,6 @@ def _fetch_smap_gee(lat, lon, date):
     if not GEE_AVAILABLE:
         return None, None
 
-    grid = _gee_grid_for_point(lat, lon)
     date_naive = date.replace(tzinfo=None) if date.tzinfo else date
 
     coll_id = (
@@ -304,28 +303,21 @@ def _fetch_smap_gee(lat, lon, date):
         if smap.size().getInfo() == 0:
             return None, None
 
-        img = smap.first()
-
-        sm_pixels = ee.data.computePixels({
-            "expression": img.select("soil_moisture_am"),
-            "fileFormat": "NUMPY_NDARRAY",
-            "grid": grid,
-        })
-        sm = float(sm_pixels["soil_moisture_am"][0][0])
-        if sm < 0:
-            sm = None
-
-        vwc_pixels = ee.data.computePixels({
-            "expression": img.select("vegetation_water_content_am"),
-            "fileFormat": "NUMPY_NDARRAY",
-            "grid": grid,
-        })
-        vwc = float(vwc_pixels["vegetation_water_content_am"][0][0])
-        if vwc < 0:
-            vwc = None
+        # A city point can fall on a masked satellite pixel. Average the nearby
+        # 25 km area, which matches the broad spatial scale of the forecast.
+        region = ee.Geometry.Point([lon, lat]).buffer(25_000)
+        values = smap.first().reduceRegion(
+            reducer=ee.Reducer.mean(), geometry=region, scale=9_000,
+            bestEffort=True, maxPixels=100_000,
+        ).getInfo()
+        raw_sm = values.get("soil_moisture_am")
+        raw_vwc = values.get("vegetation_water_content_am")
+        sm = float(raw_sm) if raw_sm is not None and float(raw_sm) >= 0 else None
+        vwc = float(raw_vwc) if raw_vwc is not None and float(raw_vwc) >= 0 else None
 
         return sm, vwc
-    except Exception:
+    except Exception as exc:
+        print(f"SMAP lookup failed for {lat:.3f},{lon:.3f} on {date_naive:%Y-%m-%d}: {type(exc).__name__}")
         return None, None
 
 
@@ -333,7 +325,6 @@ def _fetch_modis_aod_gee(lat, lon, date):
     if not GEE_AVAILABLE:
         return 0.0
 
-    grid = _gee_grid_for_point(lat, lon)
     date_naive = date.replace(tzinfo=None) if date.tzinfo else date
 
     try:
@@ -349,17 +340,22 @@ def _fetch_modis_aod_gee(lat, lon, date):
         if modis.size().getInfo() == 0:
             return 0.0
 
-        pixels = ee.data.computePixels({
-            "expression": modis.max(),
-            "fileFormat": "NUMPY_NDARRAY",
-            "grid": grid,
-        })
-
-        raw = float(pixels["Optical_Depth_055"][0][0])
+        # MODIS AOD is frequently cloud or quality masked at a single point.
+        # Use the mean valid reading within 25 km of the covered city.
+        region = ee.Geometry.Point([lon, lat]).buffer(25_000)
+        values = modis.max().reduceRegion(
+            reducer=ee.Reducer.mean(), geometry=region, scale=1_000,
+            bestEffort=True, maxPixels=1_000_000,
+        ).getInfo()
+        value = values.get("Optical_Depth_055")
+        if value is None:
+            return 0.0
+        raw = float(value)
         if raw <= 0:
             return 0.0
         return raw * 0.001
-    except Exception:
+    except Exception as exc:
+        print(f"MODIS AOD lookup failed for {lat:.3f},{lon:.3f} on {date_naive:%Y-%m-%d}: {type(exc).__name__}")
         return 0.0
 
 

@@ -44,7 +44,7 @@ class MonitoringLifecycleTests(unittest.TestCase):
     def test_alert_thresholds_and_downgrades_are_respected(self):
         self.assertTrue(should_deliver("warning", "alert", "upgraded"))
         self.assertFalse(should_deliver("alert", "warning", "upgraded"))
-        self.assertTrue(should_deliver("alert", "clear", "downgraded"))
+        self.assertFalse(should_deliver("alert", "clear", "downgraded"))
 
 
 if __name__ == "__main__":

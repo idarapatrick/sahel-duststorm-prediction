@@ -206,14 +206,46 @@ def require_session(token: str | None) -> dict[str, Any]:
     return user
 
 
-def delete_account(token: str | None) -> None:
+async def request_account_deletion_otp(
+    token: str | None, device_id: str | None, ip: str | None
+) -> dict[str, Any]:
+    """Send a fresh OTP to the number belonging to the active account."""
     user = require_session(token)
+    return await request_otp(user["phone_uid"], "delete", device_id, ip)
+
+
+def _delete_phone_account(connection, phone_uid: str) -> None:
+    """Delete the identity and all records that are directly tied to it."""
+    connection.execute("DELETE FROM alert_deliveries WHERE phone_uid=%s", (phone_uid,))
+    connection.execute("DELETE FROM sms_messages WHERE phone_uid=%s", (phone_uid,))
+    connection.execute("DELETE FROM otp_challenges WHERE phone_uid=%s", (phone_uid,))
+    connection.execute("DELETE FROM known_devices WHERE phone_uid=%s", (phone_uid,))
+    connection.execute("DELETE FROM alert_identities WHERE phone_uid=%s", (phone_uid,))
+
+
+def confirm_account_deletion(token: str | None, challenge_id: str, code: str) -> None:
+    """Delete an account only after a valid, unused deletion OTP is supplied."""
+    user = require_session(token)
+    now = datetime.now(timezone.utc)
     with _postgres_connection() as connection:
-        connection.execute("DELETE FROM alert_deliveries WHERE phone_uid=%s", (user["phone_uid"],))
-        connection.execute("DELETE FROM sms_messages WHERE phone_uid=%s", (user["phone_uid"],))
-        connection.execute("DELETE FROM otp_challenges WHERE phone_uid=%s", (user["phone_uid"],))
-        connection.execute("DELETE FROM known_devices WHERE phone_uid=%s", (user["phone_uid"],))
-        connection.execute("DELETE FROM alert_identities WHERE phone_uid=%s", (user["phone_uid"],))
+        row = connection.execute(
+            "SELECT * FROM otp_challenges WHERE id=%s FOR UPDATE", (challenge_id,)
+        ).fetchone()
+        if not row or row["consumed_at"] or row["purpose"] != "delete":
+            raise AuthError(400, "This account deletion request is no longer valid")
+        if row["phone_uid"] != user["phone_uid"]:
+            raise AuthError(403, "This code does not belong to the signed-in account")
+        if row["expires_at"] < now:
+            raise AuthError(400, "The verification code has expired. Request a new one.")
+        if row["attempts"] >= MAX_OTP_ATTEMPTS:
+            raise AuthError(429, "Too many incorrect attempts. Request a new code.")
+        expected = _digest(f"{challenge_id}:{code}")
+        if not hmac.compare_digest(row["code_hash"], expected):
+            connection.execute(
+                "UPDATE otp_challenges SET attempts=attempts+1 WHERE id=%s", (challenge_id,)
+            )
+            raise AuthError(400, "The verification code is incorrect")
+        _delete_phone_account(connection, user["phone_uid"])
 
 
 async def send_alert_sms(phone_uid: str, message: str) -> str | None:
