@@ -5,3 +5,5 @@ models/*.onnx
 *.tif
 *.npz
 *.h5
+backend/.env
+backend/.env.example

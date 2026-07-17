@@ -59,16 +59,15 @@
 		progressTimer = setInterval(() => forecastProgress = Math.min(82, forecastProgress + (forecastProgress < 45 ? 7 : 3)), 450);
 		const latestRequest = getLatestPrediction(location).then((value) => { forecastProgress = Math.max(forecastProgress, 72); return value; });
 		const weatherRequest = getCurrentConditions(location).then((value) => { forecastProgress = Math.max(forecastProgress, 45); return value; });
-		const [latestResult, conditionsResult] = await Promise.allSettled([latestRequest, weatherRequest]);
-		try {
-			if (latestResult.status === 'fulfilled') prediction = latestResult.value;
-			else { forecastProgress = Math.max(forecastProgress, 84); prediction = await getPrediction(location); forecastProgress = 94; }
-			if (conditionsResult.status === 'fulfilled') {
-				const c = conditionsResult.value;
-				prediction = { ...prediction, conditions: { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: prediction.surfaceData?.vegetationWaterContent ?? 0, aod: prediction.surfaceData?.aod ?? 0 } };
-			}
-			online = true;
-		} catch { prediction = previousPrediction || demoPrediction(location); online = false; }
+		const freshRequest = getPrediction(location).then((value) => { forecastProgress = 94; return value; });
+		const [freshResult, latestResult, conditionsResult] = await Promise.allSettled([freshRequest, latestRequest, weatherRequest]);
+		const fallback = latestResult.status === 'fulfilled' ? latestResult.value : previousPrediction;
+		prediction = freshResult.status === 'fulfilled' ? freshResult.value : (fallback || demoPrediction(location));
+		if (conditionsResult.status === 'fulfilled') {
+			const c = conditionsResult.value;
+			prediction = { ...prediction, conditions: { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: prediction.surfaceData?.vegetationWaterContent ?? 0, aod: prediction.surfaceData?.aod ?? 0 } };
+		}
+		online = freshResult.status === 'fulfilled' || latestResult.status === 'fulfilled' || conditionsResult.status === 'fulfilled';
 		progressive = null;
 		dailyHorizons = null;
 		forecastProgress = 100; if (progressTimer) clearInterval(progressTimer);
@@ -191,7 +190,15 @@
 					{/if}
 				</div>
 				<div class="risk-orb {riskTone}" style={`--value:${prediction.available === false ? 0 : prediction.probability}`} aria-label={prediction.available === false ? 'Prediction unavailable' : `${probability} percent dust-storm probability`}>
-					<div><span>{loading || prediction.available === false ? 'Not available' : probability}</span>{#if prediction.available !== false}<small>%</small>{/if}<p>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</p></div>
+					<div>
+						{#if loading}
+							<span>{forecastProgress}</span><small>%</small><p>Preparing</p>
+						{:else if prediction.available === false}
+							<span class="unavailable-value">!</span><p>Not available</p>
+						{:else}
+							<span>{probability}</span><small>%</small><p>{prediction.riskLevel}</p>
+						{/if}
+					</div>
 				</div>
 			</section>
 
@@ -285,6 +292,7 @@
 	.risk-orb.clear { --tone: var(--green); }.risk-orb.watch { --tone: var(--yellow); }.risk-orb.warning { --tone: var(--orange); }.risk-orb.alert { --tone: var(--red); }
 	.risk-orb > div { width: 88%; aspect-ratio: 1; display: grid; place-content: center; text-align: center; border-radius: 50%; background: var(--bg-elevated); box-shadow: inset 0 0 40px rgba(255,255,255,.14); backdrop-filter: blur(25px); }
 	.risk-orb span { font-size: clamp(4.2rem, 8vw, 7.5rem); font-weight: 750; line-height: .9; letter-spacing: -.07em; font-variant-numeric: tabular-nums; }.risk-orb small { font-size: 1.2rem; color: var(--text-secondary); }.risk-orb p { margin: 12px 0 0; color: var(--tone); font-size: .78rem; font-weight: 750; text-transform: uppercase; }
+	.risk-orb span.unavailable-value { font-size: clamp(3.5rem, 7vw, 6rem); letter-spacing: 0; }
 	.metrics { margin-bottom: 68px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }.metrics article { min-height: 130px; padding: 20px; display: flex; align-items: flex-start; gap: 14px; border-radius: var(--radius-md); }.metric-icon { min-width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; color: var(--blue); background: color-mix(in srgb, var(--blue) 10%, transparent); }.metrics p,.metrics small { display: block; color: var(--text-secondary); }.metrics p { margin: 0 0 8px; font-size: .78rem; }.metrics strong { font-size: 1.12rem; }.metrics small { margin-top: 5px; font-size: .72rem; }
 	.explanation { margin: -42px 0 24px; padding: clamp(22px, 4vw, 38px); display: grid; grid-template-columns: auto 1fr; gap: 18px; border-radius: var(--radius-lg); }.explanation-icon { width: 50px; height: 50px; display: grid; place-items: center; border-radius: 17px; color: var(--blue); background: color-mix(in srgb,var(--blue) 11%,transparent); }.explanation h2 { margin-bottom: 10px; font-size: clamp(1.4rem,2.5vw,2.2rem); letter-spacing: -.035em; }.explanation p { margin-bottom: 10px; max-width: 850px; color: var(--text-secondary); line-height: 1.65; }.explanation small { color: var(--text-tertiary); }
 	.data-warning{margin:-42px 0 56px;padding:14px 16px;display:flex;align-items:flex-start;gap:10px;border:1px solid color-mix(in srgb,var(--orange) 35%,var(--border));border-radius:16px;color:var(--text-secondary);background:color-mix(in srgb,var(--orange) 8%,var(--surface))}.data-warning p{margin:0;font-size:.8rem;line-height:1.5}.data-warning svg{flex:none;color:var(--orange)}

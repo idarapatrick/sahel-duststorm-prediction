@@ -1,6 +1,8 @@
-# SahelDust: Cross-Modal Attention for Dust Emission Forecasting
+# SahelWatch: Cross-Modal Attention for Dust Emission Forecasting
 
-A deep learning system that predicts significant dust emission events over the African Sahel 24 to 48 hours in advance using multi-modal satellite data. Built as a BSc Software Engineering capstone project at African Leadership University.
+SahelWatch is a deep learning system that predicts significant dust emission events over the African Sahel 24 to 48 hours in advance using multi-modal satellite data. Built as a BSc Software Engineering capstone project at African Leadership University.
+
+The official application is the SvelteKit interface in `frontend/`. It uses a light-default Apple-inspired visual system, an optional dark theme, daily-resolution day+0/day+1/day+2 forecast horizons, and a persistent 90-day prediction archive. The horizon cadence follows the daily MODIS AOD ground truth; SahelWatch does not claim independent clock-hour labels.
 
 **Live Demo:** [https://saheldust-frontend.vercel.app](https://saheldust-frontend.vercel.app)
 
@@ -34,7 +36,7 @@ Sand and dust storms in the African Sahel kill people, destroy crops, contaminat
 
 ## Solution Overview
 
-SahelDust is a three-tier early warning system:
+SahelWatch is a three-tier early warning system:
 
 1. **Mobile Web App** for community users showing dust risk forecasts with interactive maps and location-based alerts
 2. **Desktop Dashboard** for WMO meteorological centre operators to review, confirm, or dismiss predictions before alerts are sent to communities (human-in-the-loop)
@@ -127,8 +129,9 @@ Create a `.env` file in the `backend/` directory:
 
 ```
 HF_SPACE_URL=https://mavencodes-saheldust-api.hf.space/predict
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_KEY=your_supabase_anon_key
+DATABASE_URL=postgresql://sahelwatch_app:password@host:25060/sahelwatch?sslmode=require
+DATABASE_REQUIRED=true
+HISTORY_RETENTION_DAYS=90
 CORS_ORIGINS=http://localhost:3000,https://saheldust-frontend.vercel.app
 ```
 
@@ -147,53 +150,12 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 
 ### Step 4: Set up the database
 
-Go to [supabase.com](https://supabase.com), create a project, and run this SQL in the SQL Editor:
+Create a PostgreSQL database and apply the versioned files in `backend/migrations/` in numerical order. DigitalOcean Managed PostgreSQL is used in production; SQLite is only the local-development fallback.
 
-```sql
-create table users (
-  id uuid primary key default gen_random_uuid(),
-  phone text unique not null,
-  email text,
-  location_lat float not null,
-  location_lon float not null,
-  location_name text,
-  alert_threshold text default 'warning',
-  created_at timestamptz default now()
-);
-
-create table alert_subscriptions (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references users(id),
-  lat float not null,
-  lon float not null,
-  location_name text,
-  threshold text default 'warning',
-  active boolean default true,
-  created_at timestamptz default now()
-);
-
-create table sent_alerts (
-  id uuid primary key default gen_random_uuid(),
-  phone text not null,
-  location_name text,
-  alert_level text,
-  probability float,
-  message text,
-  confirmed_by text,
-  sent_at timestamptz default now()
-);
-
-create table prediction_log (
-  id uuid primary key default gen_random_uuid(),
-  lat float,
-  lon float,
-  location_name text,
-  probability float,
-  alert_level text,
-  confidence_pct float,
-  prediction_date text,
-  created_at timestamptz default now()
-);
+```bash
+psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -f backend/migrations/001_prediction_history.sql
+psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -f backend/migrations/002_phone_alert_identity.sql
+psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -f backend/migrations/003_digitalocean_postgres.sql
 ```
 
 ---

@@ -17,7 +17,7 @@ load_dotenv()
 from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_detailed, fetch_features_for_date, fetch_forecast, get_location_name
 from alert_tracker import progressive_predict, get_all_tracked, clear_expired
 from history_store import RETENTION_DAYS, database_status, query_latest_environmental_evidence, query_recent_snapshots, query_snapshots, save_snapshot
-from monitoring_store import ensure_monitoring_job
+from monitoring_store import ensure_monitoring_job, record_environmental_evidence
 from prediction_cache import build_cache_key, get_cached_prediction, try_acquire_prediction_lease
 from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
@@ -439,6 +439,15 @@ async def predict_location(request: Request, lat: float, lon: float):
             "dust_event": result["dust_event"], "data_source": "open-meteo+gee" if GEE_AVAILABLE else "open-meteo+satellite-fallback",
             "metadata": {"risk_level": result["risk_level"], "endpoint": "predict/location", "cache_key": cache_key, "provenance": provenance,
                          "surface_data": {"soil_moisture": surface[0], "vegetation_water_content": surface[1], "prev_day_aod": surface[2]}},
+        })
+        record_environmental_evidence({
+            "lat": lat,
+            "lon": lon,
+            "location_name": location_name,
+            "prediction_time": datetime.now(timezone.utc).isoformat(),
+            "current_conditions": current_conditions,
+            "surface_data": prediction.surface_data,
+            "input_quality": prediction.input_quality,
         })
         ensure_monitoring_job(lat, lon, (datetime.now(timezone.utc) + timedelta(days=1)).date())
         payload = prediction.model_dump(mode="json")
