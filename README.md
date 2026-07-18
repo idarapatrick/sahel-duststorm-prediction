@@ -1,415 +1,417 @@
-# SahelWatch: Cross-Modal Attention for Dust Emission Forecasting
+# SahelWatch
 
-SahelWatch is a deep learning system that predicts significant dust emission events over the African Sahel 24 to 48 hours in advance using multi-modal satellite data. Built as a BSc Software Engineering capstone project at African Leadership University.
+SahelWatch is an AI-powered dust and sand storm monitoring and early-warning platform for communities in the Sahel. It combines atmospheric forecasts, recent satellite observations, a dust-event classifier, continuous background monitoring, location-based history, and alert delivery infrastructure in one deployed system.
 
-The official application is the SvelteKit interface in `frontend/`. It uses a light-default Apple-inspired visual system, an optional dark theme, daily-resolution day+0/day+1/day+2 forecast horizons, and a persistent 90-day prediction archive. The horizon cadence follows the daily MODIS AOD ground truth; SahelWatch does not claim independent clock-hour labels.
+This repository contains the machine-learning work, FastAPI backend, PostgreSQL schema and workers, and the responsive SvelteKit web application developed for a BSc Software Engineering capstone project at the African Leadership University.
 
-**Live Demo:** [https://saheldust-frontend.vercel.app](https://saheldust-frontend.vercel.app)
+## Submission links
 
-**Video Demo:** [5-minute walkthrough](https://drive.google.com/drive/folders/1L8UkDWP4soofYIxR8nKEt8P2K8rnCITg?usp=sharing)
+- **Five-minute demonstration video:** [Watch on YouTube](https://youtu.be/M0oD24Dbub4)
+- **Live web application:** [saheldust-frontend.vercel.app](https://saheldust-frontend.vercel.app)
+- **Backend API documentation:** [saheldust-backend.onrender.com/docs](https://saheldust-backend.onrender.com/docs)
+- **Backend health check:** [saheldust-backend.onrender.com/api/v1/health](https://saheldust-backend.onrender.com/api/v1/health)
+- **Model service documentation:** [mavencodes-saheldust-api.hf.space/docs](https://mavencodes-saheldust-api.hf.space/docs)
 
-**API Documentation:** [https://saheldust-backend.onrender.com/docs](https://saheldust-backend.onrender.com/docs)
+## Problem and project objective
 
-**Model API:** [https://mavencodes-saheldust-api.hf.space/docs](https://mavencodes-saheldust-api.hf.space/docs)
+Sand and dust storms reduce visibility, damage crops and infrastructure, contaminate water sources, and worsen respiratory illness. Many at-risk Sahelian communities do not receive accessible, location-specific early information.
 
----
+SahelWatch aims to provide a practical screening and monitoring system that:
 
-## Table of Contents
+1. estimates the likelihood of dust-producing conditions for a selected Sahel location;
+2. explains the result using wind, temperature, soil moisture, and aerosol optical depth (AOD);
+3. updates predictions as newer observations replace forecast values;
+4. records immutable prediction revisions for up to 90 days;
+5. creates alerts only when risk rises above clear conditions; and
+6. supports optional phone-linked accounts for future offline SMS delivery.
 
-1. [Problem Statement](#problem-statement)
-2. [Solution Overview](#solution-overview)
-3. [Architecture](#architecture)
-4. [Installation and Setup](#installation-and-setup)
-5. [Running the Application](#running-the-application)
-6. [Testing Results](#testing-results)
-7. [Analysis of Results](#analysis-of-results)
-8. [Deployment Plan](#deployment-plan)
-9. [Discussion](#discussion)
-10. [Recommendations](#recommendations)
-11. [Project Structure](#project-structure)
+SahelWatch is an early-warning aid, not a replacement for an official warning issued by a national meteorological organisation.
 
----
+## Implemented functionality
 
-## Problem Statement
+### Community web application
 
-Sand and dust storms in the African Sahel kill people, destroy crops, contaminate water sources, and trigger respiratory disease outbreaks. On June 11, 2026, a severe sandstorm struck Birnin Kebbi, Nigeria with no specific early warning issued to communities. Existing dust forecasting systems require computational infrastructure that Sahelian meteorological centres do not have.
+- Responsive SvelteKit interface for desktop and mobile browsers
+- Location selection from all currently covered cities
+- Fresh prediction when the application starts or the location changes
+- Progress state that does not display a probability before a result exists
+- Current wind speed, temperature, soil moisture, and AOD when their providers return valid data
+- Plain-language prediction evidence and data-availability warnings
+- Tracking view, current alerts, recent history, and date-based history search
+- Ninety-day rolling retention for prediction records created by the system
+- Optional phone account, OTP flow, login, logout, and OTP-confirmed account deletion
+- Privacy policy and terms of use pages
+- Multi-horizon control retained in a disabled “Coming soon” state
 
-## Solution Overview
+### Backend and operations
 
-SahelWatch is a three-tier early warning system:
+- FastAPI endpoints with coordinate validation and consistent error responses
+- Open-Meteo atmospheric forecast and observation retrieval
+- Google Earth Engine access for recent SMAP soil moisture and MODIS AOD
+- Remote model inference through the deployed model service
+- PostgreSQL prediction history and environmental evidence storage
+- Request coalescing and short-lived PostgreSQL response caching for near-simultaneous requests
+- Autonomous reinforcement worker that monitors eleven central locations
+- PostgreSQL job claiming with `FOR UPDATE SKIP LOCKED`, safe for multiple workers
+- Immutable prediction revisions every configured monitoring interval
+- Alert upgrade and downgrade events through a transactional outbox
+- Separate alert-delivery worker with idempotency, retry, and dead-letter handling
+- Worker heartbeat, queue health, rate limiting, retention cleanup, and health reporting
 
-1. **Mobile Web App** for community users showing dust risk forecasts with interactive maps and location-based alerts
-2. **Desktop Dashboard** for WMO meteorological centre operators to review, confirm, or dismiss predictions before alerts are sent to communities (human-in-the-loop)
-3. **SMS Alerts** for feature phone users in rural areas without internet access, triggered only after human operator confirmation
+## Prediction design
 
-The machine learning model uses a dual-encoder architecture with cross-modal attention that fuses:
-- 72-hour atmospheric sequences from ERA5 reanalysis (wind, temperature, pressure, boundary layer height, precipitation, dewpoint)
-- Surface observations from SMAP (soil moisture, vegetation water content) and MODIS (aerosol optical depth)
+### Current operational prediction
 
-The model was trained on 1.9 million samples across the Sahel (10N-25N, 18W-25E) from 2015 to 2022, validated on 2023, and tested on the full unsubsampled 2024 data.
+The deployed classifier returns one binary dust-event probability. The backend builds its input from:
 
----
+- a 72-hour atmospheric window containing wind, temperature, pressure, precipitation, boundary-layer and moisture-related variables;
+- recent SMAP soil moisture and vegetation water content;
+- previous available MODIS AOD;
+- latitude, longitude, and seasonal encoding.
 
-## Architecture
+The result is translated into four operational levels:
 
+| Probability | Level | Behaviour |
+|---:|---|---|
+| Below 0.30 | Clear | Stored, but no alert broadcast is created |
+| 0.30 to below 0.50 | Watch | Conditions require attention |
+| 0.50 to below 0.70 | Warning | Dust-producing conditions are increasingly likely |
+| 0.70 and above | Alert | Highest operational risk level |
+
+The progressive pipeline accepts both increases and decreases. If new observations reduce the estimated risk, the new lower result is stored and the alert can be downgraded.
+
+### Continuous reinforcement
+
+The background worker creates monitoring jobs without waiting for users. For each covered location it:
+
+1. creates or finds the next target-day job;
+2. atomically claims the job from PostgreSQL;
+3. retrieves updated atmospheric and surface evidence;
+4. runs inference again;
+5. stores a new immutable snapshot and its evidence;
+6. creates an outbox event only for a meaningful risk-level transition;
+7. schedules the next evaluation; and
+8. stops after the target monitoring window expires.
+
+The recent-history endpoint can therefore contain predictions made centrally by the worker as well as user-triggered predictions. The 90-day policy is a retention maximum, not a fabricated historical backfill. A date before the service began recording legitimately returns no prediction snapshots.
+
+### Multi-horizon limitation
+
+The available dust-event ground truth is daily MODIS AOD. It cannot support separately trained 12-hour, 24-hour, 36-hour, and 48-hour labels. The correct research extension uses day+0, day+1, and day+2 labels for the same grid cell, with missing satellite days masked rather than interpolated.
+
+The three-head PyTorch extension and date-aware label builder are retained in `ml/`, but the production endpoint returns HTTP 501 and the frontend marks the feature as coming soon. It will remain disabled until training, final evaluation, and ONNX export are complete.
+
+## System architecture
+
+```text
+SvelteKit web application on Vercel
+                 |
+                 v
+FastAPI API on Render
+  |              |                 |
+  v              v                 v
+Open-Meteo   Google Earth      Model service
+weather      Engine satellite  on Hugging Face
+                 |
+                 v
+DigitalOcean Managed PostgreSQL
+  |                     |
+  v                     v
+Reinforcement worker    Alert-delivery worker
+  |                     |
+  v                     v
+Prediction revisions    SMS provider integration
+and alert outbox         and delivery records
 ```
-Open-Meteo API (real-time atmospheric forecast)
-     |
-     v
-FastAPI Backend (Render) --> Google Earth Engine (SMAP, MODIS)
-     |
-     v
-ONNX Model API (Hugging Face Spaces)
-     |
-     v
-FastAPI Backend --> Progressive Alert Tracker
-     |                    |
-     v                    v
-Next.js Frontend     Supabase (PostgreSQL)
-(Vercel)                  |
-     |                    v
-     v              SMS via Africa's Talking
-Mobile + Desktop UI      (feature phones)
-```
 
-### Progressive Prediction System
+## Technology stack
 
-The system does not make a single prediction and stop. It continuously refines predictions as the target date approaches:
+| Area | Technology |
+|---|---|
+| Frontend | SvelteKit, TypeScript, Vite, MapLibre GL |
+| Backend | Python, FastAPI, Pydantic, HTTPX |
+| Machine learning | PyTorch, ONNX Runtime, dual encoder with cross-modal attention |
+| Atmospheric data | Open-Meteo |
+| Surface and aerosol data | Google Earth Engine, SMAP, MODIS |
+| Database | DigitalOcean Managed PostgreSQL |
+| Web hosting | Vercel |
+| API and workers | Render |
+| Model hosting | Hugging Face Spaces |
+| SMS integration | Africa's Talking adapter; live delivery remains operationally dependent on approved provider credentials and sender configuration |
 
-- **Day 1 (48 hours before):** Uses atmospheric forecast data. All 72 hours are forecast values. Confidence is low. If probability exceeds 0.3, a WATCH alert is generated.
-- **Day 2 (24 hours before):** The first 24 hours of the atmospheric window now use real observed data instead of forecast values. The remaining 48 hours are still forecast. Confidence improves. If probability exceeds 0.5, a WARNING is generated.
-- **Day 3 (6 hours before):** 42 hours are real observations, 30 hours are forecast. SMAP morning soil moisture is available. This is the highest-confidence prediction. If probability exceeds 0.7, an ALERT is generated.
-
-At any point, if real observations contradict the forecast and the probability drops, the alert is de-escalated and a cancellation message is generated.
-
-SMS alerts to communities are only sent after a WMO operator reviews and confirms the prediction on the desktop dashboard. This human-in-the-loop design prevents false alarm fatigue.
-
-### Technology Stack
-
-| Component | Technology | Purpose |
-|---|---|---|
-| ML Model | PyTorch, ONNX Runtime | Training and inference |
-| Model API | FastAPI, Hugging Face Spaces | Serves ONNX model |
-| Backend | FastAPI, Python | Data pipeline, alert tracking |
-| Frontend | Next.js 14, shadcn/ui, Tailwind | Web interface |
-| Maps | Leaflet / Mapbox GL | Geospatial visualization |
-| Database | Supabase (PostgreSQL) | Users, subscriptions, alert logs |
-| SMS | Africa's Talking | Feature phone alerts |
-| Deployment | Vercel, Render, HF Spaces | Hosting |
-| Data Sources | Open-Meteo, Google Earth Engine | Real-time satellite data |
-
----
-
-## Installation and Setup
+## Installation and local execution
 
 ### Prerequisites
 
-- Python 3.11 or higher
-- Node.js 18 or higher
-- npm or yarn
-- A Google Earth Engine account (optional, for SMAP/MODIS data)
+- Git
+- Python 3.11 or newer
+- Node.js 22 and npm
+- PostgreSQL for the complete backend workflow
+- Google Earth Engine project and service account for live SMAP and MODIS access
+- Access to the configured model endpoint
 
-### Step 1: Clone the repository
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/idarapatrick/sahel-duststorm-prediction.git
 cd sahel-duststorm-prediction
 ```
 
-### Step 2: Set up the backend
+### 2. Create the backend environment
 
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate   # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
 ```
 
-Create a `.env` file in the `backend/` directory:
+On Windows PowerShell, activate the environment with:
 
+```powershell
+.venv\Scripts\Activate.ps1
 ```
+
+Edit `backend/.env`. At minimum, a production-like setup needs:
+
+```dotenv
 HF_SPACE_URL=https://mavencodes-saheldust-api.hf.space/predict
-DATABASE_URL=postgresql://sahelwatch_app:password@host:25060/sahelwatch?sslmode=require
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE?sslmode=require
 DATABASE_REQUIRED=true
 HISTORY_RETENTION_DAYS=90
-CORS_ORIGINS=http://localhost:3000,https://saheldust-frontend.vercel.app
+AUTH_SECRET=replace-with-at-least-32-random-characters
+CORS_ORIGINS=http://localhost:5173
+GEE_PROJECT_ID=your-google-cloud-project-id
+GEE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"..."}
+MULTI_HORIZON_MODEL_URL=
 ```
 
-### Step 3: Set up the frontend
+Never commit `.env`, database credentials, API keys, authentication secrets, or a Google service-account key.
+
+### 3. Apply database migrations
+
+Use the direct administrator connection as `DATABASE_ADMIN_URL` locally. If it is absent, the migration runner uses `DATABASE_URL`.
 
 ```bash
-cd ../frontend
-npm install
+python migrate.py
 ```
 
-Create a `.env.local` file in the `frontend/` directory:
+The runner applies every unapplied SQL file in `backend/migrations/` and records it in `schema_migrations`.
 
-```
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-```
-
-### Step 4: Set up the database
-
-Create a PostgreSQL database and apply the versioned files in `backend/migrations/` in numerical order. DigitalOcean Managed PostgreSQL is used in production; SQLite is only the local-development fallback.
+### 4. Start the backend API
 
 ```bash
-psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -f backend/migrations/001_prediction_history.sql
-psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -f backend/migrations/002_phone_alert_identity.sql
-psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -f backend/migrations/003_digitalocean_postgres.sql
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
----
+Open:
 
-## Running the Application
+- API root: `http://localhost:8000`
+- Interactive API documentation: `http://localhost:8000/docs`
+- Operational health: `http://localhost:8000/api/v1/health`
 
-### Start the backend
+### 5. Start the reinforcement worker
+
+In a second terminal, activate the same environment and run:
 
 ```bash
 cd backend
-source venv/bin/activate
-uvicorn main:app --reload
+source .venv/bin/activate
+python reinforcement_worker.py
 ```
 
-The API runs at `http://localhost:8000`. API docs at `http://localhost:8000/docs`.
+### 6. Start the alert-delivery worker
 
-### Start the frontend
+In a third terminal:
 
-In a separate terminal:
+```bash
+cd backend
+source .venv/bin/activate
+python alert_delivery_worker.py
+```
+
+This worker requires the database and SMS variables to perform real delivery. Without approved live SMS configuration, use it only to verify queue and retry behaviour.
+
+### 7. Install and start the frontend
+
+In another terminal from the repository root:
 
 ```bash
 cd frontend
+npm install
+cp .env.example .env
 npm run dev
 ```
 
-The app runs at `http://localhost:3000`.
+Set the frontend variable to the local API:
 
-### Deployed versions
-
-The application is live and accessible:
-
-- Frontend: [https://saheldust-frontend.vercel.app](https://saheldust-frontend.vercel.app)
-- Backend API: [https://saheldust-backend.onrender.com/docs](https://saheldust-backend.onrender.com/docs)
-- Model API: [https://mavencodes-saheldust-api.hf.space/docs](https://mavencodes-saheldust-api.hf.space/docs)
-
-Note: Free-tier services (Render, HF Spaces) sleep after 15 minutes of inactivity. The first request after sleeping takes 30 to 60 seconds to wake up.
-
----
-
-## Testing Results
-
-### 1. Unit Testing: API Endpoint Validation
-
-Each backend endpoint was tested with valid inputs, edge cases, and invalid inputs.
-
-**Valid input test (Niamey, Niger):**
-```
-GET /api/v1/predict/location?lat=13.51&lon=2.11
-Response: 200 OK
-{
-  "lat": 13.51,
-  "lon": 2.11,
-  "location_name": "Niamey, Niger",
-  "probability": 0.0741,
-  "risk_level": "low",
-  "dust_event": false,
-  "prediction_date": "2026-06-27",
-  "data_source": "open-meteo+gee"
-}
+```dotenv
+PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
-**Edge case test (boundary coordinates):**
-```
-GET /api/v1/predict/location?lat=10.0&lon=-18.0
-Response: 200 OK (southern and western boundary of study area)
+Open `http://localhost:5173`.
 
-GET /api/v1/predict/location?lat=25.0&lon=25.0
-Response: 200 OK (northern and eastern boundary)
-```
+### 8. Run repository checks
 
-**Invalid input test (outside Sahel):**
-```
-GET /api/v1/predict/location?lat=5.0&lon=2.0
-Response: 400 Bad Request
-{"detail": "Latitude must be between 10 and 25 (Sahel region)"}
+```bash
+cd frontend
+npm run check
+npm run build
 ```
 
-### 2. Integration Testing: End-to-End Data Flow
+The repository also contains focused backend checks for history, current conditions, monitoring windows, and daily-horizon label construction. Install `pytest` in the backend environment before running them:
 
-Tested the full pipeline: Frontend sends coordinates to Backend, Backend fetches atmospheric data from Open-Meteo, fetches SMAP/MODIS from GEE, sends to HF Space Model API, returns prediction to frontend.
-
-**Locations tested:**
-
-| Location | Lat | Lon | Probability | Risk Level | Season |
-|---|---|---|---|---|---|
-| Niamey, Niger | 13.51 | 2.11 | 0.074 | Low | Wet (July) |
-| Banizoumbou, Niger | 13.53 | 2.67 | 0.074 | Low | Wet (July) |
-| Sokoto, Nigeria | 13.06 | 5.24 | varies | varies | Wet (July) |
-| Dakar, Senegal | 14.69 | -17.44 | 0.75 | High | Dust transport (July) |
-| N'Djamena, Chad | 12.13 | 15.06 | varies | varies | varies |
-| Nouakchott, Mauritania | 18.09 | -15.98 | varies | varies | varies |
-
-Low probabilities during the wet season (July) are physically correct: the West African monsoon brings moisture, vegetation grows, and dust emission is suppressed.
-
-### 3. Progressive Prediction Testing
-
-Called the progressive endpoint multiple times for the same location and target date to verify prediction tracking:
-
-**First call:**
-- update_count: 1, trend: "new", confidence: 34.7%, hours_real: 25/72
-
-**Second call (5 minutes later):**
-- update_count: 2, trend: "stable", confidence: 34.7%, hours_real: 25/72, prob_change: 0.0
-
-The system correctly tracks prediction history and reports trends.
-
-### 4. Multi-Day Forecast Testing
-
-```
-GET /api/v1/forecast?lat=13.51&lon=2.11&days=3
-Response: 200 OK, returns predictions for 3 consecutive future days
+```bash
+cd backend
+python -m pip install pytest
+python -m pytest -q
 ```
 
-Each day returns independent probability, risk level, and dust event classification.
+## Functional and performance testing
 
-### 5. Performance Testing
+The assessed demonstration focuses on functionality testing rather than unit-testing footage. The [five-minute video](https://youtu.be/M0oD24Dbub4) is the primary demonstration evidence.
 
-| Environment | First Request (cold) | Subsequent Requests | Notes |
-|---|---|---|---|
-| Local (M1 Mac / Linux) | 15 to 30 seconds | 5 to 10 seconds | GEE queries dominate latency |
-| Render (free tier, cold start) | 60 to 90 seconds | 10 to 20 seconds | Server wake-up adds latency |
-| HF Spaces (model inference only) | 1 to 2 seconds | < 1 second | ONNX inference is fast |
+### Testing strategies and evidence
 
-### 6. Cross-Browser Testing
+| Strategy | Demonstration | Expected evidence |
+|---|---|---|
+| Normal input | Select a covered city and request a prediction | Probability, risk level, location, conditions, and evidence are returned |
+| Different data values | Compare multiple Sahel cities | The system retrieves location-specific inputs and does not hard-code one result |
+| Invalid input | Submit coordinates outside the supported range | HTTP 400 response with a clear validation message |
+| Missing upstream field | Inspect a result when satellite data is unavailable | Field is marked unavailable or degraded; the client does not invent a value |
+| Location switching | Change city in the web application | A fresh location request starts and the previous city's result is not relabelled |
+| History | Request recent Niamey history and a recorded target date | Stored user and `background-progressive-open-meteo+gee` snapshots are returned |
+| Background execution | Compare worker heartbeat, queue state, and a later history record | A fresh heartbeat and newly stored immutable background snapshot are visible |
+| Alert threshold | Compare clear and controlled watch or warning conditions | Clear results create no broadcast; higher levels create an outbox alert event |
+| Concurrency | Send several requests for the same coordinates concurrently | Successful responses share cached inference and avoid duplicate work |
+| Latency | Measure warm, cold, average, and 95th-percentile response time | HTTP status and measured timing are captured, not estimated |
+| Compatibility | Run on desktop and a real mobile browser or alternate browser | Responsive layout and core flow remain usable |
 
-| Browser | Desktop | Mobile | Status |
-|---|---|---|---|
-| Chrome 126 | Tested | Tested | Works |
-| Safari 17 | Tested | Tested (iOS) | Works |
-| Firefox 127 | Tested | Not tested | Works |
+Example latency command:
 
----
-
-## Analysis of Results
-
-### Alignment with Proposal Objectives
-
-**Objective 1: Build a multi-modal deep learning model for dust prediction.**
-Achieved. 12 models trained and evaluated (3 baselines, 6 neural networks, 3 Focal Loss variants). The best model (LSTM + Cross-Modal Attention) achieves ROC-AUC of 0.86 on the fully unsubsampled 2024 test set.
-
-**Objective 2: Compare cross-modal attention against late fusion.**
-Achieved. Cross-modal attention improves recall by 5.5 to 5.7% over concatenation for CNN and LSTM encoders. This confirms that modelling the interaction between surface susceptibility and atmospheric forcing captures additional dust emission signal.
-
-**Objective 3: Evaluate geographic generalization.**
-Achieved with a nuanced result. The model shows partial geographic transfer (West to East AUC 0.81, East to West AUC 0.78) but benefits significantly from region-specific training data (full model AUC 0.89). Operational deployment should include training data from all target regions.
-
-**Objective 4: Deploy an operational early warning system.**
-Achieved. The system is live with a mobile web app, backend API with progressive prediction, and database integration. SMS alerting and the WMO desktop dashboard are partially complete.
-
-### Where Results Missed Objectives
-
-**Precision and recall targets:** The initial goal of precision and recall both above 0.6 was not achieved. At the 5.7% positive rate in the test set, this would require ROC-AUC above 0.93. The current best is 0.86. This is a structural constraint of the classification problem, not a model limitation. The system addresses this through the progressive prediction architecture and human-in-the-loop operator review.
-
-**Full geographic generalization:** The model does not fully generalize across sub-regions. Performance gaps of 0.08 to 0.11 AUC points exist between regional models and the full model. This was reported as a finding rather than hidden.
-
----
-
-## Deployment Plan
-
-### Deployment Architecture
-
-| Component | Platform | Tier | URL |
-|---|---|---|---|
-| ML Model | Hugging Face Spaces (Docker) | Free | mavencodes-saheldust-api.hf.space |
-| Backend API | Render | Free | saheldust-backend.onrender.com |
-| Frontend | Vercel | Free | saheldust-frontend.vercel.app |
-| Database | Supabase | Free | (project dashboard) |
-
-### Deployment Steps Executed
-
-1. Trained LSTM + CMA model in PyTorch on Kaggle GPU
-2. Exported to ONNX format (5.4 MB)
-3. Created FastAPI app with ONNX Runtime inference
-4. Dockerized and deployed to Hugging Face Spaces
-5. Built data pipeline using Open-Meteo (atmospheric forecast) and GEE (SMAP, MODIS)
-6. Built progressive alert tracker with escalating alert levels
-7. Deployed backend to Render with environment variables
-8. Built Next.js frontend with shadcn/ui components
-9. Deployed frontend to Vercel
-10. Configured Supabase PostgreSQL database with user and alert tables
-11. Connected all services and verified CORS, end-to-end data flow
-
-### Deployment Verification
-
-- Backend health check returns `{"status": "ok"}`
-- Model API accepts atmospheric and surface arrays and returns predictions
-- Frontend successfully calls backend which calls model API
-- Progressive prediction tracking works across multiple calls
-- Reverse geocoding returns location names for all Sahel coordinates tested
-
----
-
-## Discussion
-
-### Milestone 1: Data Pipeline
-Building the GEE data extraction pipeline was the most time-intensive milestone. Processing 10 years of hourly ERA5 data across 11,696 grid cells required careful batching, parallel processing, and checkpointing. The switch from AOD threshold 0.5 to 0.7 required re-running the entire pipeline but produced cleaner labels and better model performance.
-
-### Milestone 2: Model Training
-The 12-model comparison with Optuna hyperparameter optimization provided rigorous evidence for architecture decisions. Key finding: BCE loss outperforms Focal Loss on balanced training data because Focal Loss was designed for imbalanced datasets. Tversky Loss caused mode collapse across all architectures.
-
-### Milestone 3: Feature Engineering
-Adding boundary layer height, total precipitation, dewpoint temperature, and vegetation water content improved ROC-AUC from 0.83 to 0.86. Previous-day AOD dominates feature importance at 5x any other feature, confirming that dust persistence is the strongest predictor.
-
-### Milestone 4: Deployment Architecture
-The progressive prediction system is the most impactful design decision. Rather than issuing a single prediction, the system continuously refines its forecast as real observations replace forecast data. This reduces false positives because alerts that are not reinforced by subsequent observational data are automatically downgraded before reaching the highest alert level.
-
-### Impact of Results
-At the high-recall operating point (threshold 0.50), the model catches 72% of significant dust events. In the current situation where communities receive no automated warning, even an imperfect screening tool that flags 3 out of 4 events for human review represents a meaningful improvement. The system runs on consumer hardware, uses freely available satellite data, and requires no computational infrastructure beyond a web browser.
-
----
-
-## Recommendations
-
-### For the Community
-1. The system should be piloted with a single WMO Regional Specialized Meteorological Centre to validate the progressive prediction approach with trained forecasters before scaling to multiple countries.
-2. Alert thresholds should be calibrated through community consultation rather than set by ML convention. The acceptable false positive rate depends on the cost of a missed event versus the cost of a false alarm in each specific community context.
-
-### For Future Technical Work
-1. Incorporate aerosol type discrimination using the MODIS Deep Blue product or CALIOP vertical profiling to separate mineral dust from urban pollution, biomass burning, and sea salt at coastal and urban locations.
-2. Replace the binary classification with multi-class severity prediction (moderate, severe, extreme) or continuous AOD regression to provide more granular warnings.
-3. Add sub-daily prediction windows (6-hourly instead of daily) to provide more actionable timing information about when within the day a dust event is expected.
-4. Integrate ECMWF IFS operational forecast data directly for higher quality atmospheric inputs in real-time, replacing the Open-Meteo intermediary.
-5. Implement model retraining automation: as new satellite data becomes available, periodically retrain the model to capture evolving dust source patterns and climate trends.
-
-### For the Research Community
-1. Multi-modal attention architectures show promise for rare atmospheric event prediction but require careful label quality assessment. Label noise from broadband AOD at the 0.5 threshold is a greater constraint than model capacity.
-2. Geographic generalization testing should be standard practice in regional atmospheric prediction studies. Reporting only overall metrics hides significant performance variation across sub-regions.
-
----
-
-## Project Structure
-
-```
-Dual-Encoder-Model-for-Sahel-Dust-Forecasting/
-  frontend/
-    app/                    # Next.js 14 App Router pages
-    components/             # React components (shadcn/ui based)
-    lib/                    # API client, utilities, types
-    public/                 # Static assets
-    .env.local              # Frontend environment variables
-    package.json
-    tailwind.config.ts
-
-  backend/
-    main.py                 # FastAPI application with all endpoints
-    data_pipeline.py        # Open-Meteo + GEE data fetching and processing
-    alert_tracker.py        # Progressive prediction tracking and alert management
-    requirements.txt        # Python dependencies
-    .env                    # Backend environment variables (not committed)
-
-  README.md                 # This file
+```bash
+curl -o /dev/null -sS \
+  -w "HTTP: %{http_code}\nFirst byte: %{time_starttransfer}s\nTotal: %{time_total}s\n" \
+  "https://saheldust-backend.onrender.com/api/v1/predict/location?lat=13.5127&lon=2.1125"
 ```
 
-### ML Notebooks (external)
-- Preprocessing: Google Colab (01_preprocessing.ipynb)
-- Training and Evaluation: Kaggle (02_training_evaluation.ipynb)
-- AERONET Validation: Google Colab (03_aeronet_validation.ipynb)
+Example concurrent-request command:
+
+```bash
+seq 1 20 | xargs -P 5 -I {} \
+  curl -o /dev/null -sS \
+  -w "Request {}: HTTP %{http_code}, %{time_total}s\n" \
+  "https://saheldust-backend.onrender.com/api/v1/predict/location?lat=13.5127&lon=2.1125"
+```
+
+### Analysis of results against project objectives
+
+- **End-to-end objective:** Achieved for supported locations. The deployed frontend can request the backend, which obtains environmental inputs, calls the model service, stores the result, and returns user-facing evidence.
+- **Continuous monitoring objective:** Achieved. The reinforcement worker creates central jobs, refreshes predictions, records evidence, and reschedules work independently of user activity.
+- **History objective:** Achieved as rolling retention for records produced since deployment. It does not fabricate predictions for dates before monitoring began. An immediate retrospective 90-day environmental archive remains future work.
+- **Robustness objective:** Substantially achieved through validation, request coalescing, immutable storage, database-backed queues, retries, heartbeats, rate limiting, and degraded-data reporting.
+- **Offline alert objective:** The account, subscription, outbox, delivery, and provider adapter architecture is implemented. Production delivery across Sahel countries still requires approved sender configuration and operational agreements with SMS or telecommunications providers.
+- **Multi-horizon objective:** Not yet operational. Scientifically valid daily heads are designed, but production remains disabled pending trained and validated weights.
+
+Measured latency and success-rate values should be taken directly from the demonstration run because hosting wake state, network route, Earth Engine response time, and model-service state change between runs.
+
+## Deployment plan and execution
+
+| Component | Platform | Production responsibility |
+|---|---|---|
+| SvelteKit frontend | Vercel | Responsive user interface and API client |
+| FastAPI web service | Render | Validation, data orchestration, inference, history and authentication APIs |
+| Reinforcement worker | Render background worker | Central prediction updates and alert transitions |
+| Alert-delivery worker | Render background worker | Recipient matching, SMS attempts, retries and dead letters |
+| PostgreSQL | DigitalOcean Managed Database | Durable users, jobs, snapshots, evidence, cache and outbox records |
+| Model API | Hugging Face Spaces | Deployed binary classifier inference |
+| Satellite access | Google Earth Engine | Recent SMAP and MODIS observations |
+
+The detailed production variables, Render commands, migration procedure, worker setup, database guidance, and verification checklist are in [`docs/deployment.md`](docs/deployment.md).
+
+Production verification includes:
+
+1. `/api/v1/health` reports the database, Earth Engine, model, queues, and worker heartbeats.
+2. `/api/v1/predict/location` returns a real stored result with current conditions and input provenance.
+3. `/api/v1/history/recent` contains worker-generated records for centrally monitored cities.
+4. Repeated coordinate requests return successfully without duplicate inference work inside the cache window.
+5. Clear conditions do not generate warning broadcasts.
+6. Watch, warning, and alert transitions create outbox records for eligible subscriptions.
+
+## Code quality and repository organisation
+
+The implementation separates API routing, data acquisition, prediction models, persistence, monitoring, authentication, alert delivery, and frontend presentation. Database changes are versioned and repeatable. Workers communicate through PostgreSQL rather than process-local memory, allowing services to restart or scale independently.
+
+```text
+.
+├── backend/
+│   ├── main.py                       # FastAPI routes and application middleware
+│   ├── model.py                      # API response models and validation
+│   ├── data_pipeline.py              # Open-Meteo and Earth Engine input pipeline
+│   ├── history_store.py              # Immutable prediction-history persistence
+│   ├── monitoring_store.py           # PostgreSQL monitoring queue and evidence
+│   ├── prediction_cache.py           # Distributed response cache and coalescing
+│   ├── reinforcement_worker.py       # Autonomous central monitoring worker
+│   ├── alert_store.py                # Outbox, delivery, heartbeat and queue storage
+│   ├── alert_delivery_worker.py      # SMS delivery worker
+│   ├── auth_store.py                 # Phone OTP, sessions and deletion workflow
+│   ├── migrations/                   # Versioned PostgreSQL schema changes
+│   └── tests/                        # Focused backend checks
+├── frontend/
+│   ├── src/routes/                   # Dashboard, privacy and terms pages
+│   ├── src/lib/api.ts                # Typed backend client
+│   ├── src/lib/locations.ts          # Supported locations
+│   ├── src/lib/components/           # Onboarding, header and map components
+│   └── src/lib/styles/               # Themes, glass surfaces and animation
+├── ml/
+│   ├── multi_horizon_model.py        # Pending day+0/day+1/day+2 heads
+│   └── daily_horizon_labels.py       # Date-aware, non-fabricated daily labels
+├── notebooks/                        # Preprocessing, evaluation and validation work
+├── docs/
+│   ├── deployment.md                 # Production deployment instructions
+│   └── prediction_architecture.md    # Prediction architecture explanation
+├── data/README.md                     # Data notes
+└── README.md
+```
+
+## Discussion and impact
+
+The principal engineering milestone is the move from an isolated prediction screen to a durable monitoring system. A user request can create a prediction immediately, while independent workers continue checking central locations, store every revision, and prepare higher-risk transitions for delivery. This matters in the Sahel because users should not need to keep an application open for monitoring to continue.
+
+The use of forecast atmospheric data with the latest available satellite surface evidence reflects the different update frequencies of the providers. MODIS AOD and SMAP are observational inputs, not future forecasts. Their observation dates and availability must therefore remain visible and must never be represented as future measurements.
+
+The project also demonstrates an important scientific limitation: a daily satellite label cannot validate four independent clock-hour targets. Keeping the unvalidated multi-horizon interface disabled protects the credibility of the system while the correct daily-resolution extension is trained.
+
+## Recommendations and future work
+
+### Community and operational recommendations
+
+1. Pilot the system with national meteorological organisations and affected communities before treating its thresholds as operational warnings.
+2. Develop messages in locally appropriate languages and validate that risk wording leads to useful, safe action.
+3. Agree on alert authority, escalation, cancellation, and audit procedures with participating organisations.
+4. Work with telecommunications providers and WMOs to deliver reliable, affordable offline messages across supported countries.
+
+### Technical future work
+
+1. Complete, evaluate, calibrate, and export the day+0/day+1/day+2 model before enabling multi-horizon forecasts.
+2. Add a clearly labelled retrospective environmental-analysis service for the period before prediction monitoring began.
+3. Reconcile SMS provider delivery receipts and migrate phone authentication to a production identity provider if selected.
+4. Add successful-job duration logs and operational dashboards for worker schedule delay and processing latency.
+5. Perform database restore drills and add higher availability for the API, workers, model endpoint, and database.
+6. Evaluate the system using new dry-season observations and location-specific calibration with WMO experts.
+
+## Related project files
+
+- [`FRONTEND_REBUILD.md`](FRONTEND_REBUILD.md): frontend rebuild requirements and design direction
+- [`backend_swe_requirements.md`](backend_swe_requirements.md): backend software-engineering requirements
+- [`current backend.md`](current%20backend.md): earlier backend assessment and context
+- [`docs/prediction_architecture.md`](docs/prediction_architecture.md): detailed prediction and reinforcement design
+- [`docs/deployment.md`](docs/deployment.md): deployment and verification procedure
+- [`data/README.md`](data/README.md): dataset information
+
+## Demonstration
+
+The submitted video prioritises the core product flow, environmental evidence, location changes, prediction history, background monitoring, robustness, and deployment rather than spending most of the five-minute limit on account creation.
+
+**Watch the complete demonstration:** [https://youtu.be/M0oD24Dbub4](https://youtu.be/M0oD24Dbub4)
