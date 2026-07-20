@@ -401,15 +401,6 @@ The project also demonstrates an important scientific limitation: a daily satell
 5. Perform database restore drills and add higher availability for the API, workers, model endpoint, and database.
 6. Evaluate the system using new dry-season observations and location-specific calibration with WMO experts.
 
-## Related project files
-
-- [`FRONTEND_REBUILD.md`](FRONTEND_REBUILD.md): frontend rebuild requirements and design direction
-- [`backend_swe_requirements.md`](backend_swe_requirements.md): backend software-engineering requirements
-- [`current backend.md`](current%20backend.md): earlier backend assessment and context
-- [`docs/prediction_architecture.md`](docs/prediction_architecture.md): detailed prediction and reinforcement design
-- [`docs/deployment.md`](docs/deployment.md): deployment and verification procedure
-- [`data/README.md`](data/README.md): dataset information
-
 ## Demonstration
 
 The submitted video prioritises the core product flow, environmental evidence, location changes, prediction history, background monitoring, robustness, and deployment rather than spending most of the five-minute limit on account creation.
