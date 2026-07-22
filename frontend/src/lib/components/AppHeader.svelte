@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { Search, Moon, Sun, ChevronDown, Wind } from 'lucide-svelte';
-	import { locations } from '$lib/locations';
 	import type { Location } from '$lib/types';
 	import { createEventDispatcher, onMount } from 'svelte';
 
 	export let selected: Location;
+	export let locations: Location[] = [];
 	export let online = true;
 	const dispatch = createEventDispatcher<{ select: Location }>();
 	let query = '';
@@ -30,14 +30,14 @@
 	<div class="search-wrap">
 		<label class="search">
 			<Search size={18} aria-hidden="true" />
-			<span class="sr-only">Search a covered Sahel city</span>
-			<input bind:value={query} on:focus={() => open = true} placeholder="Search a covered city" autocomplete="off" />
+			<span class="sr-only">Search a covered Sahel community</span>
+			<input bind:value={query} on:focus={() => open = true} placeholder="Search a city, town or village" autocomplete="off" />
 		</label>
 		{#if open}
 			<div class="results glass">
 				{#each filtered as location}
-					<button on:click={() => choose(location)}><span>{location.name}</span><small>{location.country}</small></button>
-				{:else}<p>No covered city found</p>{/each}
+					<button on:click={() => choose(location)}><span>{location.name}</span><small>{location.country}{location.placeType ? ` · ${location.placeType}` : ''}{location.coverageStatus === 'provisional' ? ' · checks continuing' : ''}</small></button>
+				{:else}<p>No covered community found</p>{/each}
 			</div>
 		{/if}
 	</div>

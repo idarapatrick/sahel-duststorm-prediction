@@ -21,6 +21,28 @@ async function getJson(path: string) {
 	} finally { clearTimeout(timeout); }
 }
 
+function coveredPlace(x: any): Location {
+	return {
+		name: x.name, country: x.country, lat: Number(x.lat), lon: Number(x.lon),
+		countryCode: x.country_code, placeType: x.place_type, coverageStatus: x.coverage_status,
+		forecastLat: Number(x.forecast_lat ?? x.lat), forecastLon: Number(x.forecast_lon ?? x.lon)
+	};
+}
+
+function forecastCoordinates(location: Location) {
+	return { lat: location.forecastLat ?? location.lat, lon: location.forecastLon ?? location.lon };
+}
+
+export async function getCoveredLocations(): Promise<Location[]> {
+	const data = await getJson('/api/v1/coverage/places?limit=500');
+	return Array.isArray(data.places) ? data.places.map(coveredPlace) : [];
+}
+
+export async function getNearestCoveredLocation(lat: number, lon: number): Promise<Location> {
+	const data = await getJson(`/api/v1/coverage/nearest?lat=${lat}&lon=${lon}`);
+	return coveredPlace(data.place);
+}
+
 async function postJson(path: string, body?: unknown) {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -46,11 +68,22 @@ export async function verifyOtp(challengeId: string, code: string, preferredLoca
 	});
 }
 
+export async function createFirebaseSession(idToken: string, purpose: 'signup' | 'login', deviceId: string, preferredLocation?: Location) {
+	return postJson('/api/v1/auth/firebase/session', {
+		id_token: idToken, purpose, device_id: deviceId,
+		preferred_location: preferredLocation ? { name: `${preferredLocation.name}, ${preferredLocation.country}`, lat: preferredLocation.forecastLat ?? preferredLocation.lat, lon: preferredLocation.forecastLon ?? preferredLocation.lon } : null
+	});
+}
+
+export async function deleteFirebaseAccount(idToken: string) {
+	return postJson('/api/v1/auth/firebase/account/delete', { id_token: idToken });
+}
+
 export async function getAuthState(): Promise<AuthState> {
 	const d = await getJson('/api/v1/auth/me');
 	if (!d.authenticated) return { authenticated: false };
 	const user = d.user;
-	return { authenticated: true, user: { phoneUid: user.phone_uid, preferredLocation: user.preferred_lat == null ? undefined : { name: user.preferred_location_name, country: '', lat: user.preferred_lat, lon: user.preferred_lon } } };
+	return { authenticated: true, user: { phoneUid: user.phone_uid, authProvider: user.auth_provider, preferredLocation: user.preferred_lat == null ? undefined : { name: user.preferred_location_name, country: '', lat: user.preferred_lat, lon: user.preferred_lon } } };
 }
 
 export async function logout() { return postJson('/api/v1/auth/logout'); }
@@ -64,9 +97,10 @@ export async function confirmAccountDeletion(challengeId: string, code: string) 
 }
 
 export async function saveAlertSubscription(location: Location, threshold: 'watch' | 'warning' | 'alert') {
+	const point = forecastCoordinates(location);
 	const response = await fetch(`${base}/api/v1/subscriptions`, {
 		method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ lat: location.lat, lon: location.lon, location_name: `${location.name}, ${location.country}`, threshold })
+		body: JSON.stringify({ lat: point.lat, lon: point.lon, location_name: `${location.name}, ${location.country}`, threshold })
 	});
 	const payload = await response.json().catch(() => ({}));
 	if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
@@ -79,22 +113,32 @@ export async function getNotifications() {
 }
 
 export async function getLatestPrediction(location: Location): Promise<Prediction> {
-	const d = await getJson(`/api/v1/predictions/latest?lat=${location.lat}&lon=${location.lon}`);
+	const point = forecastCoordinates(location);
+	const d = await getJson(`/api/v1/predictions/latest?lat=${point.lat}&lon=${point.lon}`);
 	const x = d.prediction;
+	const c = d.current_conditions;
 	return { lat: x.lat, lon: x.lon, locationName: x.location_name, probability: x.probability,
 		riskLevel: x.alert_level, dustEvent: x.dust_event, predictionDate: x.target_date,
 		dataSource: x.data_source, available: true,
+		conditions: c ? { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh,
+			windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c,
+			surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm,
+			dewpointC: c.dewpoint_c ?? 0, soilMoisture: c.soil_moisture,
+			vegetationWaterContent: c.vegetation_water_content, aod: c.aod } : undefined,
 		surfaceData: d.surface_data ? { soilMoisture: d.surface_data.soil_moisture, vegetationWaterContent: d.surface_data.vegetation_water_content, aod: d.surface_data.prev_day_aod } : undefined,
-		inputQuality: d.evidence?.raw_payload?.input_quality ? { degraded: d.evidence.raw_payload.input_quality.degraded, warning: d.evidence.raw_payload.input_quality.warning, fields: d.evidence.raw_payload.input_quality } : undefined };
+		inputQuality: d.evidence?.raw_payload?.input_quality ? { degraded: d.evidence.raw_payload.input_quality.degraded, warning: d.evidence.raw_payload.input_quality.warning, fields: d.evidence.raw_payload.input_quality } : undefined,
+		freshness: d.freshness ? { recordedAt: d.freshness.recorded_at, ageMinutes: d.freshness.age_minutes, stale: d.freshness.stale, source: d.freshness.source } : undefined };
 }
 
 export async function getCurrentConditions(location: Location) {
-	const d = await getJson(`/api/v1/conditions/current?lat=${location.lat}&lon=${location.lon}`);
+	const point = forecastCoordinates(location);
+	const d = await getJson(`/api/v1/conditions/current?lat=${point.lat}&lon=${point.lon}`);
 	return d.current_conditions;
 }
 
 export async function getPrediction(location: Location): Promise<Prediction> {
-	const d = await getJson(`/api/v1/predict/location?lat=${location.lat}&lon=${location.lon}`);
+	const point = forecastCoordinates(location);
+	const d = await getJson(`/api/v1/predict/location?lat=${point.lat}&lon=${point.lon}`);
 	const c = d.current_conditions;
 	return {
 		lat: d.lat, lon: d.lon, locationName: d.location_name, probability: d.probability,
@@ -120,12 +164,14 @@ export async function getPrediction(location: Location): Promise<Prediction> {
 }
 
 export async function getForecast(location: Location): Promise<Forecast> {
-	const d = await getJson(`/api/v1/forecast?lat=${location.lat}&lon=${location.lon}&days=3`);
+	const point = forecastCoordinates(location);
+	const d = await getJson(`/api/v1/forecast?lat=${point.lat}&lon=${point.lon}&days=3`);
 	return { lat: d.lat, lon: d.lon, locationName: d.location_name, generatedAt: d.generated_at, days: d.days.map((x: any) => ({ date: x.date, probability: x.probability, risk: x.risk_level, dustEvent: x.dust_event })) };
 }
 
 export async function getProgressiveEvidence(location: Location): Promise<ProgressiveEvidence> {
-	const d = await getJson(`/api/v1/predict/progressive?lat=${location.lat}&lon=${location.lon}`);
+	const point = forecastCoordinates(location);
+	const d = await getJson(`/api/v1/predict/progressive?lat=${point.lat}&lon=${point.lon}`);
 	const c = d.current_conditions;
 	return {
 		probability: d.probability, riskLevel: d.alert_level, targetDate: d.target_date,
@@ -147,18 +193,21 @@ export async function getProgressiveEvidence(location: Location): Promise<Progre
 }
 
 export async function getHistory(location: Location, date: string): Promise<HistoricalSnapshot[]> {
-	const qs = new URLSearchParams({ lat: String(location.lat), lon: String(location.lon), date });
+	const point = forecastCoordinates(location);
+	const qs = new URLSearchParams({ lat: String(point.lat), lon: String(point.lon), date });
 	const d = await getJson(`/api/v1/history?${qs}`);
 	return d.snapshots.map((x: any) => ({ id: x.id, lat: x.lat, lon: x.lon, locationName: x.location_name, probability: x.probability, riskLevel: x.alert_level, dustEvent: x.dust_event, predictionDate: x.target_date, targetDate: x.target_date, recordedAt: x.recorded_at, dataSource: x.data_source, modelVersion: x.model_version, source: 'live' }));
 }
 
 export async function getRecentHistory(location: Location, limit = 10): Promise<HistoricalSnapshot[]> {
-	const d = await getJson(`/api/v1/history/recent?lat=${location.lat}&lon=${location.lon}&limit=${limit}`);
+	const point = forecastCoordinates(location);
+	const d = await getJson(`/api/v1/history/recent?lat=${point.lat}&lon=${point.lon}&limit=${limit}`);
 	return d.snapshots.map((x: any) => ({ id: x.id, lat: x.lat, lon: x.lon, locationName: x.location_name, probability: x.probability, riskLevel: x.alert_level, dustEvent: x.dust_event, predictionDate: x.target_date, targetDate: x.target_date, recordedAt: x.recorded_at, dataSource: x.data_source, modelVersion: x.model_version, source: 'live' }));
 }
 
 export async function getDailyHorizons(location: Location): Promise<DailyHorizonResponse> {
-	const d = await getJson(`/api/v1/predict/daily-horizons?lat=${location.lat}&lon=${location.lon}`);
+	const point = forecastCoordinates(location);
+	const d = await getJson(`/api/v1/predict/daily-horizons?lat=${point.lat}&lon=${point.lon}`);
 	const c = d.current_conditions;
 	return {
 		lat: d.lat, lon: d.lon, locationName: d.location_name, referenceDate: d.reference_date,

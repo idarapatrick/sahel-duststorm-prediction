@@ -1,7 +1,12 @@
 export type RiskLevel = 'clear' | 'watch' | 'warning' | 'alert';
 
-export interface Location { name: string; country: string; lat: number; lon: number; }
-export interface AuthUser { phoneUid: string; preferredLocation?: Location; }
+export interface Location {
+	name: string; country: string; lat: number; lon: number;
+	countryCode?: string; placeType?: 'city' | 'town' | 'village' | 'community';
+	coverageStatus?: 'validated' | 'operational' | 'provisional';
+	forecastLat?: number; forecastLon?: number;
+}
+export interface AuthUser { phoneUid: string; authProvider?: 'firebase' | 'legacy_otp'; preferredLocation?: Location; }
 export interface AuthState { authenticated: boolean; user?: AuthUser; }
 export interface ForecastDay { date: string; probability: number; risk: string; dustEvent: boolean; }
 export interface Forecast { lat: number; lon: number; locationName: string; generatedAt: string; days: ForecastDay[]; }
@@ -11,6 +16,7 @@ export interface Prediction {
 	conditions?: Conditions;
 	surfaceData?: { soilMoisture: number; vegetationWaterContent: number; aod: number };
 	inputQuality?: { degraded: boolean; warning?: string; fields?: Record<string, any> };
+	freshness?: { recordedAt: string; ageMinutes: number; stale: boolean; source: string };
 	available?: boolean;
 }
 export interface HistoricalSnapshot extends Prediction {

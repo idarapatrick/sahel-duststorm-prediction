@@ -5,16 +5,16 @@
 	<p class="eyebrow">Legal</p>
 	<h1>Privacy Policy</h1>
 	<p>SahelWatch can be used without creating a phone account. Location searches and prediction snapshots are primarily environmental records, but account and device information is processed when needed to provide personal location preferences, secure login and requested alerts.</p>
-	<h2>Phone numbers and OTP verification</h2>
-	<p>A linked number is stored in normalized international format and becomes the unique account identifier. Africa’s Talking processes the number and verification or alert message for SMS delivery. Verification codes are stored only as cryptographic hashes, expire after a short period and cannot be recovered by SahelWatch. Phone numbers are never sold.</p>
+	<h2>Phone numbers and verification</h2>
+	<p>A linked number is stored in normalized international format. Firebase Authentication processes the phone number and verification code and gives SahelWatch a unique identity reference after verification. SahelWatch does not store the Firebase verification code. Twilio processes phone numbers and alert messages when SMS alerts are enabled. Phone numbers are never sold.</p>
 	<h2>Location and IP addresses</h2>
-	<p>If you choose “Use my current location,” the browser requests location permission and SahelWatch selects the nearest covered forecast location. The app remains usable if permission is refused or the device is outside the validated region. Server infrastructure necessarily receives IP addresses when requests are made. SahelWatch hashes IP addresses before storing limited security and device-session metadata and may use network information to support coarse location services, abuse prevention and troubleshooting. An IP address is not used as an account ID because it may be shared or change.</p>
+	<p>If you choose “Use my current location,” the browser requests location permission and SahelWatch selects the nearest monitored community. The app remains usable if permission is refused or the device is outside the configured region. Server infrastructure necessarily receives IP addresses when requests are made. SahelWatch hashes IP addresses before storing limited security and device-session metadata and may use network information to support coarse location services, abuse prevention and troubleshooting. An IP address is not used as an account ID because it may be shared or change.</p>
 	<h2>Devices and sessions</h2>
-	<p>A random device identifier is stored in the browser to distinguish first-device onboarding and help secure sessions. Authentication sessions are stored in secure, revocable cookies. Logging out revokes the current session.</p>
+	<p>A random device identifier is stored in the browser to distinguish first-device onboarding and help secure sessions. Firebase maintains the browser authentication state, while SahelWatch stores a secure, revocable application-session cookie. Logging out ends both sessions.</p>
 	<h2>Optional SMS alerts</h2>
 	<p>Users who do not link a phone number can still use forecasts and in-app alerts, but cannot receive SMS alerts while offline. SMS preferences can be changed by logging out, unlinking or deleting the account.</p>
 	<h2>Retention and deletion</h2>
-	<p>Prediction snapshots and detailed reinforcement evidence are retained for up to 90 days. Expired OTP challenges, sessions and operational SMS records are retained only as needed for security, delivery reconciliation and legal obligations. Account deletion requires a new code sent to the linked phone. After confirmation, the phone identity, sessions, alert choices and associated delivery records are deleted.</p>
+	<p>Prediction snapshots and detailed reinforcement evidence are retained for up to 90 days. Sessions and operational SMS records are retained only as needed for security, delivery reconciliation and legal obligations. Account deletion requires fresh phone verification. After confirmation, the phone identity, sessions, alert choices and associated delivery records are deleted. Firebase identity cleanup is retried automatically if the provider is temporarily unavailable.</p>
 	<h2>Research notice</h2>
 	<p>SahelWatch is a research forecasting system and is not an official emergency-warning authority.</p>
 </main>

@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import { ArrowLeft, ArrowRight, Check, LocateFixed, MessageSquare, Phone, ShieldCheck, X } from 'lucide-svelte';
-	import { requestOtp, verifyOtp } from '$lib/api';
-	import { locations, SAHEL_BOUNDS } from '$lib/locations';
+	import { createFirebaseSession, getNearestCoveredLocation, requestOtp, verifyOtp } from '$lib/api';
+	import { firebaseAuthEnabled, finishFirebasePhoneVerification, startFirebasePhoneVerification } from '$lib/firebase';
+	import type { ConfirmationResult } from 'firebase/auth';
+	import { DEFAULT_LOCATION, SAHEL_BOUNDS } from '$lib/locations';
 	import type { Location } from '$lib/types';
 
 	export let deviceId: string;
-	export let initialLocation: Location = locations[0];
+	export let locations: Location[] = [DEFAULT_LOCATION];
+	export let initialLocation: Location = locations[0] || DEFAULT_LOCATION;
 	export let authOnly = false;
 	const dispatch = createEventDispatcher<{ complete: { location: Location; phoneUid?: string }; close: void }>();
 	let step: 'location' | 'phone-choice' | 'phone' | 'otp' = authOnly ? 'phone-choice' : 'location';
@@ -15,6 +18,7 @@
 	let phone = '';
 	let code = '';
 	let challengeId = '';
+	let firebaseConfirmation: ConfirmationResult | null = null;
 	let busy = false;
 	let message = '';
 	$: phoneValid = /^\+[1-9][0-9]{9,14}$/.test(phone.trim());
@@ -24,25 +28,26 @@
 
 	function useMyLocation() {
 		message = '';
-		if (!navigator.geolocation) { message = 'Location access is not available in this browser. Pick a covered city instead.'; return; }
+		if (!navigator.geolocation) { message = 'Location access is not available in this browser. Pick a monitored community instead.'; return; }
 		busy = true;
-		navigator.geolocation.getCurrentPosition(({ coords }) => {
-			busy = false;
+		navigator.geolocation.getCurrentPosition(async ({ coords }) => {
 			const { latitude: lat, longitude: lon } = coords;
 			if (lat < SAHEL_BOUNDS.latMin || lat > SAHEL_BOUNDS.latMax || lon < SAHEL_BOUNDS.lonMin || lon > SAHEL_BOUNDS.lonMax) {
-				message = 'Your current position is outside the validated forecast region. Please pick a covered city.'; return;
+				busy = false; message = 'Your current position is outside the forecast region. Please pick a covered community.'; return;
 			}
-			selected = locations.reduce((best, item) => Math.hypot(item.lat-lat,item.lon-lon) < Math.hypot(best.lat-lat,best.lon-lon) ? item : best);
-			message = `${selected.name} is the nearest covered location.`;
-		}, () => { busy = false; message = 'Location permission was not granted. Pick a covered city instead.'; }, { enableHighAccuracy: false, timeout: 10000 });
+			try { selected = await getNearestCoveredLocation(lat, lon); message = `${selected.name} is the nearest monitored community.`; }
+			catch { selected = locations.reduce((best, item) => Math.hypot(item.lat-lat,item.lon-lon) < Math.hypot(best.lat-lat,best.lon-lon) ? item : best); message = `${selected.name} is the nearest available community.`; }
+			finally { busy = false; }
+		}, () => { busy = false; message = 'Location permission was not granted. Pick a monitored community instead.'; }, { enableHighAccuracy: false, timeout: 10000 });
 	}
 
 	async function sendCode() {
 		if (!phoneValid) { message = 'Use international format starting with +, for example +2348012345678.'; return; }
 		busy = true; message = '';
 		try {
-			const result = await requestOtp(phone, purpose, deviceId);
-			challengeId = result.challenge_id; step = 'otp';
+			if (firebaseAuthEnabled()) firebaseConfirmation = await startFirebasePhoneVerification(phone, 'firebase-recaptcha');
+			else { const result = await requestOtp(phone, purpose, deviceId); challengeId = result.challenge_id; }
+			step = 'otp';
 		} catch (error) { message = error instanceof Error ? error.message : 'Could not send the verification code.'; }
 		finally { busy = false; }
 	}
@@ -50,7 +55,9 @@
 	async function confirmCode() {
 		busy = true; message = '';
 		try {
-			const result = await verifyOtp(challengeId, code, purpose === 'signup' ? selected : undefined);
+			const result = firebaseAuthEnabled()
+				? await finishFirebasePhoneVerification(firebaseConfirmation!, code).then(({ idToken }) => createFirebaseSession(idToken, purpose, deviceId, purpose === 'signup' ? selected : undefined))
+				: await verifyOtp(challengeId, code, purpose === 'signup' ? selected : undefined);
 			finish(result.phone_uid);
 		} catch (error) { message = error instanceof Error ? error.message : 'Could not verify this code.'; }
 		finally { busy = false; }
@@ -63,10 +70,10 @@
 		<div class="brand"><span><ShieldCheck size={21}/></span> SahelWatch</div>
 		{#if step === 'location'}
 			<p class="step">Step 1 of 2</p><h1 id="onboarding-title">Choose your forecast location</h1>
-			<p class="intro">Predictions are available only for validated locations across the Sahel. You can change this later.</p>
+			<p class="intro">Choose a monitored city, town or rural community. Provisional areas are available while local performance checks continue.</p>
 			<button class="locate" disabled={busy} on:click={useMyLocation}><LocateFixed size={19}/>{busy ? 'Checking location…' : 'Use my current location'}</button>
-			<label for="covered-location">Covered locations</label>
-			<select id="covered-location" bind:value={selected}>{#each locations as location}<option value={location}>{location.name}, {location.country}</option>{/each}</select>
+			<label for="covered-location">Monitored communities</label>
+			<select id="covered-location" bind:value={selected}>{#each locations as location}<option value={location}>{location.name}, {location.country}{location.coverageStatus === 'provisional' ? ' (checks continuing)' : ''}</option>{/each}</select>
 			{#if message}<p class="message" role="status">{message}</p>{/if}
 			<button class="primary" on:click={chooseLocation}>Continue with {selected.name}<ArrowRight size={18}/></button>
 		{:else if step === 'phone-choice'}
@@ -79,8 +86,9 @@
 		{:else if step === 'phone'}
 			<button class="back" aria-label="Back" on:click={() => { step='phone-choice'; message=''; }}><ArrowLeft size={19}/></button>
 			<p class="step">{purpose === 'signup' ? 'Create phone account' : 'Secure login'}</p><h1 id="onboarding-title">Enter your phone number</h1>
-			<p class="intro">Use international E.164 format beginning with +. Your verified number becomes your unique SahelWatch account ID.</p>
+			<p class="intro">Use international E.164 format beginning with +. Your number is verified securely before it is linked to SahelWatch.</p>
 			<label for="phone">International phone number</label><input id="phone" type="tel" autocomplete="tel" bind:value={phone} placeholder="+2348012345678" aria-describedby="phone-help" on:blur={() => { if (phone && !phoneValid) message='Use international format starting with +, for example +2348012345678.'; }} /><small id="phone-help" class="helper">Include +, country code and subscriber number. Do not start with a local 0.</small>
+			<div id="firebase-recaptcha"></div>
 			{#if message}<p class="message error" role="alert">{message}</p>{/if}
 			<button class="primary" disabled={busy || !phoneValid} on:click={sendCode}>{busy ? 'Sending code…' : 'Send verification code'}<ArrowRight size={18}/></button>
 		{:else}

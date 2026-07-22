@@ -3,11 +3,14 @@
 	import { Activity, ArrowRight, Bell, CalendarDays, Clock3, Droplets, Gauge, Info, Map, Navigation, Phone, Settings, ShieldCheck, Sparkles, Thermometer, Trash2, Wind } from 'lucide-svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import OnboardingFlow from '$lib/components/OnboardingFlow.svelte';
-	import { DEFAULT_LOCATION, locations } from '$lib/locations';
-	import { confirmAccountDeletion, demoPrediction, getActiveAlerts, getAuthState, getCurrentConditions, getHistory, getLatestPrediction, getNotifications, getPrediction, getRecentHistory, logout, requestAccountDeletionOtp, saveAlertSubscription } from '$lib/api';
+	import { DEFAULT_LOCATION, locations as fallbackLocations } from '$lib/locations';
+	import { confirmAccountDeletion, deleteFirebaseAccount, demoPrediction, getActiveAlerts, getAuthState, getCoveredLocations, getHistory, getLatestPrediction, getNotifications, getRecentHistory, logout, requestAccountDeletionOtp, saveAlertSubscription } from '$lib/api';
+	import { finishFirebasePhoneVerification, signOutFirebase, startFirebasePhoneVerification } from '$lib/firebase';
+	import type { ConfirmationResult } from 'firebase/auth';
 	import type { ActiveAlert, AuthState, DailyHorizonResponse, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence } from '$lib/types';
 
 	let selected = DEFAULT_LOCATION;
+	let locations: Location[] = fallbackLocations;
 	let prediction: Prediction = demoPrediction(selected);
 	let history: HistoricalSnapshot[] = [];
 	let recentHistory: HistoricalSnapshot[] = [];
@@ -21,6 +24,7 @@
 	let showDeleteConfirm = false;
 	let deleteError = '';
 	let deleteChallengeId = '';
+	let deleteFirebaseConfirmation: ConfirmationResult | null = null;
 	let deleteCode = '';
 	let deleteStep: 'confirm' | 'otp' = 'confirm';
 	let PredictionMapComponent: any = null;
@@ -56,18 +60,13 @@
 		selected = location; loading = true; forecastProgress = 8; history = []; historyMessage = '';
 		if (!previousPrediction) prediction = demoPrediction(location);
 		if (progressTimer) clearInterval(progressTimer);
-		progressTimer = setInterval(() => forecastProgress = Math.min(82, forecastProgress + (forecastProgress < 45 ? 7 : 3)), 450);
-		const latestRequest = getLatestPrediction(location).then((value) => { forecastProgress = Math.max(forecastProgress, 72); return value; });
-		const weatherRequest = getCurrentConditions(location).then((value) => { forecastProgress = Math.max(forecastProgress, 45); return value; });
-		const freshRequest = getPrediction(location).then((value) => { forecastProgress = 94; return value; });
-		const [freshResult, latestResult, conditionsResult] = await Promise.allSettled([freshRequest, latestRequest, weatherRequest]);
-		const fallback = latestResult.status === 'fulfilled' ? latestResult.value : previousPrediction;
-		prediction = freshResult.status === 'fulfilled' ? freshResult.value : (fallback || demoPrediction(location));
-		if (conditionsResult.status === 'fulfilled') {
-			const c = conditionsResult.value;
-			prediction = { ...prediction, conditions: { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: prediction.surfaceData?.vegetationWaterContent ?? 0, aod: prediction.surfaceData?.aod ?? 0 } };
-		}
-		online = freshResult.status === 'fulfilled' || latestResult.status === 'fulfilled' || conditionsResult.status === 'fulfilled';
+		progressTimer = setInterval(() => forecastProgress = Math.min(88, forecastProgress + 10), 120);
+		const latestResult = await Promise.allSettled([
+			getLatestPrediction(location).then((value) => { forecastProgress = 94; return value; })
+		]);
+		const central = latestResult[0];
+		prediction = central.status === 'fulfilled' ? central.value : (previousPrediction || demoPrediction(location));
+		online = central.status === 'fulfilled';
 		progressive = null;
 		dailyHorizons = null;
 		forecastProgress = 100; if (progressTimer) clearInterval(progressTimer);
@@ -82,8 +81,7 @@
 	async function refreshCentralPrediction() {
 		try {
 			const latest = await getLatestPrediction(selected);
-			const c = await getCurrentConditions(selected);
-			prediction = { ...latest, conditions: { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh, windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c, surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm, dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture, vegetationWaterContent: latest.surfaceData?.vegetationWaterContent ?? 0, aod: latest.surfaceData?.aod ?? 0 } }; online = true;
+			prediction = latest; online = true;
 		} catch { /* Keep the last explicit state; never synthesize a probability. */ }
 		loadAlerts();
 	}
@@ -95,29 +93,40 @@
 	}
 	async function sendDeleteCode() {
 		settingsBusy = true; deleteError = '';
-		try { const result = await requestAccountDeletionOtp(deviceId); deleteChallengeId = result.challenge_id; deleteStep = 'otp'; }
+		try {
+			if (authState.user?.authProvider === 'firebase') deleteFirebaseConfirmation = await startFirebasePhoneVerification(`+${linkedPhone}`, 'delete-firebase-recaptcha');
+			else { const result = await requestAccountDeletionOtp(deviceId); deleteChallengeId = result.challenge_id; }
+			deleteStep = 'otp';
+		}
 		catch (error) { deleteError = error instanceof Error ? error.message : 'We could not send the verification code. Please try again.'; }
 		finally { settingsBusy = false; }
 	}
 	async function removeAccount() {
 		if (!/^\d{6}$/.test(deleteCode)) { deleteError = 'Enter the six-digit code sent to your phone.'; return; }
 		settingsBusy = true; deleteError = '';
-		try { await confirmAccountDeletion(deleteChallengeId, deleteCode); authState = { authenticated: false }; linkedPhone = ''; showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; phoneMessage = 'Your phone account and alert records were deleted.'; }
+		try {
+			if (authState.user?.authProvider === 'firebase') {
+				const { idToken } = await finishFirebasePhoneVerification(deleteFirebaseConfirmation!, deleteCode);
+				await deleteFirebaseAccount(idToken);
+			} else await confirmAccountDeletion(deleteChallengeId, deleteCode);
+			await signOutFirebase().catch(() => {});
+			authState = { authenticated: false }; linkedPhone = ''; showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; deleteFirebaseConfirmation = null; phoneMessage = 'Your phone account and alert records were deleted.';
+		}
 		catch (error) { deleteError = error instanceof Error ? error.message : 'We could not delete the account. Please try again.'; }
 		finally { settingsBusy = false; }
 	}
 	function closeDeleteDialog() {
 		if (settingsBusy) return;
-		showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; deleteError = '';
+		showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; deleteFirebaseConfirmation = null; deleteError = '';
 	}
 
 	async function signOut() {
-		await logout(); authState = { authenticated: false }; linkedPhone = ''; phoneMessage = 'You are logged out. SMS alerts are disabled on this device.';
+		await logout(); await signOutFirebase().catch(() => {}); authState = { authenticated: false }; linkedPhone = ''; phoneMessage = 'You are logged out. SMS alerts are disabled on this device.';
 	}
 	function finishOnboarding(event: CustomEvent<{ location: Location; phoneUid?: string }>) {
 		selected = event.detail.location; localStorage.setItem('sahelwatch:location', JSON.stringify(selected));
 		localStorage.setItem('sahelwatch:onboarded', 'true'); showOnboarding = false; showAuth = false;
-		if (event.detail.phoneUid) { linkedPhone = event.detail.phoneUid; authState = { authenticated: true, user: { phoneUid: linkedPhone } }; }
+		if (event.detail.phoneUid) { linkedPhone = event.detail.phoneUid; getAuthState().then((state) => authState = state).catch(() => {}); }
 		loadLocation(selected);
 	}
 
@@ -137,6 +146,7 @@
 		if (new URLSearchParams(window.location.search).get('tab') === 'settings') activeTab = 'settings';
 		import('$lib/components/PredictionMap.svelte').then((module) => PredictionMapComponent = module.default);
 		deviceId = localStorage.getItem('sahelwatch:device_id') || crypto.randomUUID(); localStorage.setItem('sahelwatch:device_id', deviceId);
+		getCoveredLocations().then((covered) => { if (covered.length) locations = covered; }).catch(() => {});
 		const savedLocation = localStorage.getItem('sahelwatch:location');
 		if (savedLocation) { try { selected = JSON.parse(savedLocation); } catch { /* use default */ } }
 		const alreadyShown = sessionStorage.getItem('sahelwatch:splash_shown') === 'true';
@@ -157,14 +167,14 @@
 {#if showSplash}
 	<div class="splash" role="status" aria-label="Loading SahelWatch"><span><Wind size={34}/></span><strong>SahelWatch</strong><small>Preparing dust intelligence</small></div>
 {:else if showOnboarding}
-	<OnboardingFlow {deviceId} initialLocation={selected} on:complete={finishOnboarding}/>
+	<OnboardingFlow {deviceId} {locations} initialLocation={selected} on:complete={finishOnboarding}/>
 {/if}
-{#if showAuth}<OnboardingFlow {deviceId} initialLocation={selected} authOnly on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
-{#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span>{#if deleteStep === 'confirm'}<h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">Your phone number, sign-ins, SMS choices and alert records will be permanently removed. We will send a code to +{linkedPhone} before anything is deleted.</p>{:else}<h2 id="delete-title">Enter the code from your phone</h2><p id="delete-description">Enter the six-digit code sent to +{linkedPhone}. Your account will be deleted only after the code is accepted.</p><label for="delete-code">Verification code</label><input id="delete-code" class="delete-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={deleteCode} placeholder="000000" />{/if}{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={closeDeleteDialog}>Keep account</button>{#if deleteStep === 'confirm'}<button class="delete-confirm" disabled={settingsBusy} on:click={sendDeleteCode}>{settingsBusy ? 'Sending code...' : 'Send code'}</button>{:else}<button class="delete-confirm" disabled={settingsBusy || deleteCode.length !== 6} on:click={removeAccount}>{settingsBusy ? 'Deleting...' : 'Verify and delete'}</button>{/if}</div></section></div>{/if}
+{#if showAuth}<OnboardingFlow {deviceId} {locations} initialLocation={selected} authOnly on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
+{#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span>{#if deleteStep === 'confirm'}<h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">Your phone number, sign-ins, SMS choices and alert records will be permanently removed. We will send a code to +{linkedPhone} before anything is deleted.</p><div id="delete-firebase-recaptcha"></div>{:else}<h2 id="delete-title">Enter the code from your phone</h2><p id="delete-description">Enter the six-digit code sent to +{linkedPhone}. Your account will be deleted only after the code is accepted.</p><label for="delete-code">Verification code</label><input id="delete-code" class="delete-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={deleteCode} placeholder="000000" />{/if}{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={closeDeleteDialog}>Keep account</button>{#if deleteStep === 'confirm'}<button class="delete-confirm" disabled={settingsBusy} on:click={sendDeleteCode}>{settingsBusy ? 'Sending code...' : 'Send code'}</button>{:else}<button class="delete-confirm" disabled={settingsBusy || deleteCode.length !== 6} on:click={removeAccount}>{settingsBusy ? 'Deleting...' : 'Verify and delete'}</button>{/if}</div></section></div>{/if}
 
 <div class="app-shell">
 	{#if prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
-	<AppHeader bind:selected {online} on:select={(e) => loadLocation(e.detail)} />
+	<AppHeader bind:selected {locations} {online} on:select={(e) => loadLocation(e.detail)} />
 
 	<nav class="tabs glass" aria-label="Primary navigation">
 		<button class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}><Activity size={17}/>Overview</button>
@@ -241,7 +251,7 @@
 					<label><span>Date</span><input type="date" bind:value={searchDate} min={minDate} max={today}/></label>
 					<button class="primary" disabled={historyLoading}>{historyLoading ? 'Searching…' : 'Search archive'} <ArrowRight size={18}/></button>
 				</form>
-				<div class="coverage-note"><Info size={18}/><p><strong>Area not yet covered:</strong> SahelWatch does not currently provide trusted dust outlooks for Ilorin. Please choose one of the available locations.</p></div>
+				<div class="coverage-note"><Info size={18}/><p><strong>Coverage status:</strong> Operational and provisional communities use centrally monitored forecast cells. Provisional coverage means local performance evaluation is still continuing.</p></div>
 				{#if historyMessage}<p class="history-message" role="status">{historyMessage}</p>{/if}
 				{#each history as item}
 					<article class="history-result glass"><div><p class="eyebrow">Recorded {new Date(item.recordedAt).toLocaleString()}</p><h2>{item.locationName}</h2><p>Prediction target: {item.targetDate}</p></div><div class="historical-risk {item.riskLevel}"><strong>{Math.round(item.probability * 100)}%</strong><span>{item.riskLevel}</span></div></article>
@@ -260,7 +270,7 @@
 		{:else}
 			<section class="utility-page settings-page">
 				<div class="subpage-head"><div><p class="eyebrow">Personalisation</p><h1>Settings</h1><p>Your phone number is the only personal information SahelWatch needs.</p></div></div>
-				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is your unique account ID. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button><button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{/if}{#if phoneMessage}<p class="form-message" role="status" aria-live="polite">{phoneMessage}</p>{/if}</section>
+				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is linked securely to your account. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button><button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{/if}{#if phoneMessage}<p class="form-message" role="status" aria-live="polite">{phoneMessage}</p>{/if}</section>
 				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a>{#if authState.authenticated}<button class="danger-row" disabled={settingsBusy} on:click={() => { deleteError=''; deleteStep='confirm'; showDeleteConfirm=true; }}><Trash2 size={17}/>Delete account and alert records</button>{/if}</section>
 			</section>
 		{/if}
