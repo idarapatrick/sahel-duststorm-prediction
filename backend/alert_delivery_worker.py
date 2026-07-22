@@ -10,7 +10,8 @@ from alert_store import (
     ALERT_WORKER_ID, begin_delivery, claim_outbox_event, fail_delivery,
     finish_delivery, finish_event, heartbeat, matching_recipients, retry_event,
 )
-from auth_store import send_alert_sms
+from sms_provider import send_alert_sms
+from firebase_auth import retry_one_firebase_cleanup
 
 POLL_SECONDS = max(5, int(os.getenv("ALERT_WORKER_POLL_SECONDS", "15")))
 
@@ -23,8 +24,8 @@ async def process_event(event: dict) -> None:
         if not delivery_id:
             continue
         try:
-            provider_id = await send_alert_sms(phone_uid, payload["message"])
-            finish_delivery(delivery_id, provider_id)
+            provider_id, provider = await send_alert_sms(phone_uid, payload["message"])
+            finish_delivery(delivery_id, provider_id, provider)
         except Exception as exc:
             fail_delivery(delivery_id, exc)
             failures.append(exc)
@@ -40,6 +41,8 @@ async def run_forever() -> None:
             heartbeat("alert-delivery", ALERT_WORKER_ID, "running")
             event = claim_outbox_event()
             if not event:
+                if retry_one_firebase_cleanup():
+                    continue
                 await asyncio.sleep(POLL_SECONDS)
                 continue
             try:

@@ -40,27 +40,35 @@ def _postgres_connection() -> Iterator[Any]:
         yield connection
 
 
-def _sqlite_connection() -> sqlite3.Connection:
+@contextmanager
+def _sqlite_connection() -> Iterator[sqlite3.Connection]:
     connection = sqlite3.connect(SQLITE_PATH)
     connection.row_factory = sqlite3.Row
-    connection.execute(
-        """CREATE TABLE IF NOT EXISTS prediction_snapshots (
-            id TEXT PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL,
-            location_name TEXT NOT NULL, target_date TEXT NOT NULL,
-            recorded_at TEXT NOT NULL, probability REAL NOT NULL,
-            alert_level TEXT NOT NULL, dust_event INTEGER NOT NULL,
-            data_source TEXT NOT NULL, model_version TEXT, metadata TEXT NOT NULL DEFAULT '{}'
-        )"""
-    )
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON prediction_snapshots(target_date, lat, lon)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_retention ON prediction_snapshots(recorded_at)")
-    connection.execute(
-        """CREATE TABLE IF NOT EXISTS progressive_prediction_state (
-            tracking_key TEXT PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL,
-            target_date TEXT NOT NULL, state TEXT NOT NULL, updated_at TEXT NOT NULL
-        )"""
-    )
-    return connection
+    try:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS prediction_snapshots (
+                id TEXT PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL,
+                location_name TEXT NOT NULL, target_date TEXT NOT NULL,
+                recorded_at TEXT NOT NULL, probability REAL NOT NULL,
+                alert_level TEXT NOT NULL, dust_event INTEGER NOT NULL,
+                data_source TEXT NOT NULL, model_version TEXT, metadata TEXT NOT NULL DEFAULT '{}'
+            )"""
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON prediction_snapshots(target_date, lat, lon)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_retention ON prediction_snapshots(recorded_at)")
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS progressive_prediction_state (
+                tracking_key TEXT PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL,
+                target_date TEXT NOT NULL, state TEXT NOT NULL, updated_at TEXT NOT NULL
+            )"""
+        )
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def _cutoff() -> datetime:
@@ -168,7 +176,9 @@ def query_latest_environmental_evidence(lat: float, lon: float) -> dict[str, Any
         return None
     with _postgres_connection() as connection:
         row = connection.execute(
-            """SELECT e.observed_at,e.received_at,e.soil_moisture,
+            """SELECT e.observed_at,e.received_at,e.wind_speed_ms,
+                      e.wind_direction_deg,e.temperature_c,e.dewpoint_c,
+                      e.surface_pressure_hpa,e.precipitation_mm,e.soil_moisture,
                       e.vegetation_water_content,e.aod,e.raw_payload
                FROM environmental_observations e JOIN locations l ON l.id=e.location_id
                WHERE l.lat BETWEEN %s AND %s AND l.lon BETWEEN %s AND %s

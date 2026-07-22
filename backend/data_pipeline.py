@@ -124,17 +124,16 @@ async def fetch_current_conditions(lat: float, lon: float) -> dict:
 
 def get_location_name(lat: float, lon: float) -> str:
     """Reverse geocode coordinates to a place name using OpenStreetMap Nominatim."""
-    covered = [
-        (13.51, 2.11, "Niamey, Niger"), (13.06, 5.24, "Sokoto, Nigeria"),
-        (12.00, 8.52, "Kano, Nigeria"), (11.85, 13.16, "Maiduguri, Nigeria"),
-        (16.97, 7.99, "Agadez, Niger"), (12.13, 15.06, "N'Djamena, Chad"),
-        (12.64, -8.00, "Bamako, Mali"), (16.77, -3.01, "Timbuktu, Mali"),
-        (12.36, -1.48, "Ouagadougou, Burkina Faso"), (14.69, -17.44, "Dakar, Senegal"),
-        (18.09, -15.98, "Nouakchott, Mauritania"),
-    ]
-    nearest = min(covered, key=lambda item: (item[0] - lat) ** 2 + (item[1] - lon) ** 2)
-    if abs(nearest[0] - lat) <= 0.08 and abs(nearest[1] - lon) <= 0.08:
-        return nearest[2]
+    try:
+        from coverage_store import nearest_covered_place
+
+        nearest = nearest_covered_place(lat, lon)
+        if nearest and abs(float(nearest.get("forecast_lat", nearest["lat"])) - lat) <= 0.08 \
+                and abs(float(nearest.get("forecast_lon", nearest["lon"])) - lon) <= 0.08:
+            return f"{nearest['name']}, {nearest['country']}"
+    except Exception:
+        # Reverse geocoding remains available during migration or database outages.
+        pass
     try:
         response = requests.get(
             "https://nominatim.openstreetmap.org/reverse",
@@ -341,7 +340,7 @@ def _fetch_modis_aod_gee(lat, lon, date):
             return 0.0
 
         # MODIS AOD is frequently cloud or quality masked at a single point.
-        # Use the mean valid reading within 25 km of the covered city.
+        # Use the mean valid reading within 25 km of the forecast grid point.
         region = ee.Geometry.Point([lon, lat]).buffer(25_000)
         values = modis.max().reduceRegion(
             reducer=ee.Reducer.mean(), geometry=region, scale=1_000,
@@ -424,6 +423,20 @@ async def _build_features(lat, lon, date, loop):
 
 
 async def _build_features_with_provenance(lat, lon, date, loop):
+    atmospheric, surface, provenance, _ = await build_prediction_inputs(
+        lat, lon, date, loop
+    )
+    return atmospheric, surface, provenance
+
+
+async def build_prediction_inputs(lat, lon, date, loop=None):
+    """Build one canonical model payload and return its raw source data.
+
+    This public function is shared by direct, progressive, forecast, and
+    payload-export paths so satellite fallback and provenance behaviour cannot
+    silently diverge between callers.
+    """
+    loop = loop or asyncio.get_running_loop()
     raw_data = await loop.run_in_executor(
         None, _fetch_openmeteo_forecast, lat, lon, date
     )
@@ -480,38 +493,15 @@ async def _build_features_with_provenance(lat, lon, date, loop):
     provenance["degraded"] = not all(
         provenance[name]["available"] for name in ("atmospheric", "soil_moisture", "vegetation_water_content", "previous_day_aod")
     )
-    return atmospheric, surface, provenance
+    return atmospheric, surface, provenance, raw_data
 
 
 def save_payload_for_swagger(lat, lon, date, filename="swagger_payload.json"):
+    """Export the canonical input payload used by the prediction service."""
     print(f"Fetching data for {lat:.3f}N, {lon:.3f}E on {date.strftime('%Y-%m-%d')}...")
-
-    raw_data = _fetch_openmeteo_forecast(lat, lon, date)
-    atmospheric = _extract_72h_window(raw_data, date)
-    sm = _extract_soil_moisture(raw_data, date)
-
-    vwc = 0.0
-    prev_aod = 0.0
-
-    if GEE_AVAILABLE:
-        for offset in range(0, 8):
-            sm_gee, vwc_gee = _fetch_smap_gee(lat, lon, date - timedelta(days=offset))
-            if sm_gee is not None:
-                sm = sm_gee
-                vwc = vwc_gee if vwc_gee is not None else 0.0
-                break
-
-        for offset in range(1, 8):
-            aod = _fetch_modis_aod_gee(lat, lon, date - timedelta(days=offset))
-            if aod > 0:
-                prev_aod = aod
-                break
-
-    month = date.month
-    month_sin = float(np.sin(2 * np.pi * month / 12))
-    month_cos = float(np.cos(2 * np.pi * month / 12))
-    surface = [sm, vwc, prev_aod, lat, lon, month_sin, month_cos]
-
+    atmospheric, surface, _, _ = asyncio.run(
+        build_prediction_inputs(lat, lon, date)
+    )
     payload = {"atmospheric": atmospheric, "surface": surface}
 
     with open(filename, "w") as f:
@@ -522,70 +512,7 @@ def save_payload_for_swagger(lat, lon, date, filename="swagger_payload.json"):
 
 
 if __name__ == "__main__":
-    HF_API_URL = "https://mavencodes-saheldust-api.hf.space/predict"
-
-    def predict_and_print(lat, lon, date, label=""):
-        print(f"\n{label}")
-        location = get_location_name(lat, lon)
-        print(f"Location: {location} ({lat:.3f}N, {lon:.3f}E)")
-        print(f"Date: {date.strftime('%Y-%m-%d')}")
-
-        try:
-            raw_data = _fetch_openmeteo_forecast(lat, lon, date)
-            atmospheric = _extract_72h_window(raw_data, date)
-            sm = _extract_soil_moisture(raw_data, date)
-            print(f"Atmospheric: {len(atmospheric)} timesteps")
-            print(f"Soil moisture: {sm:.4f}")
-        except Exception as e:
-            print(f"Failed: {e}")
-            return
-
-        vwc = 0.0
-        prev_aod = 0.0
-
-        if GEE_AVAILABLE:
-            for offset in range(0, 8):
-                smap_date = date - timedelta(days=offset)
-                sm_gee, vwc_gee = _fetch_smap_gee(lat, lon, smap_date)
-                if sm_gee is not None:
-                    sm = sm_gee
-                    vwc = vwc_gee if vwc_gee is not None else 0.0
-                    print(f"SMAP soil moisture: {sm:.4f} ({offset} days ago)")
-                    print(f"Vegetation water content: {vwc:.4f}")
-                    break
-
-            for offset in range(1, 8):
-                aod = _fetch_modis_aod_gee(lat, lon, date - timedelta(days=offset))
-                if aod > 0:
-                    prev_aod = aod
-                    print(f"Previous AOD: {prev_aod:.4f} ({offset} days ago)")
-                    break
-
-        month = date.month
-        month_sin = float(np.sin(2 * np.pi * month / 12))
-        month_cos = float(np.cos(2 * np.pi * month / 12))
-        surface = [sm, vwc, prev_aod, lat, lon, month_sin, month_cos]
-
-        payload = {"atmospheric": atmospheric, "surface": surface}
-
-        print("Calling API...")
-        try:
-            response = requests.post(HF_API_URL, json=payload, timeout=30)
-            result = response.json()
-            print(f"Probability: {result['probability']:.4f}")
-            print(f"Dust event: {result['dust_event']}")
-            print(f"Risk level: {result['risk_level'].upper()}")
-        except Exception as e:
-            print(f"API error: {e}")
-
     tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
-    day_after = datetime.now(timezone.utc) + timedelta(days=2)
-
-    predict_and_print(13.529, 2.665, tomorrow, "Banizoumbou TOMORROW")
-    predict_and_print(12.45, 4.20, tomorrow, "Birnin Kebbi TOMORROW")
-    predict_and_print(14.394, -17.467, tomorrow, "Dakar TOMORROW")
-    predict_and_print(12.364, -1.476, tomorrow, "Ouagadougou TOMORROW")
-
     save_payload_for_swagger(13.529, 2.665, tomorrow,
                              filename="swagger_banizoumbou_forecast.json")
     save_payload_for_swagger(12.364, -1.476, tomorrow,

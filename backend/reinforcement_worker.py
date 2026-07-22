@@ -4,50 +4,51 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 from alert_tracker import progressive_predict
 from history_store import save_snapshot
 from monitoring_store import (
     WORKER_ID,
+    cancel_superseded_jobs,
     claim_due_job,
     create_alert_level_event,
     ensure_monitoring_job,
     fail_job,
+    monitoring_job_is_running,
     record_environmental_evidence,
     recover_stale_jobs,
     reschedule_job,
 )
 from alert_store import heartbeat
 from history_store import _postgres_connection
+from coverage_store import list_active_forecast_cells
 
 POLL_SECONDS = max(5, int(os.getenv("WORKER_POLL_SECONDS", "30")))
 
-CENTRAL_LOCATIONS = [
-    (13.51, 2.11, "Niamey, Niger"),
-    (13.06, 5.24, "Sokoto, Nigeria"),
-    (12.00, 8.52, "Kano, Nigeria"),
-    (11.85, 13.16, "Maiduguri, Nigeria"),
-    (16.97, 7.99, "Agadez, Niger"),
-    (12.13, 15.06, "N'Djamena, Chad"),
-    (12.64, -8.00, "Bamako, Mali"),
-    (16.77, -3.01, "Timbuktu, Mali"),
-    (12.36, -1.48, "Ouagadougou, Burkina Faso"),
-    (14.69, -17.44, "Dakar, Senegal"),
-    (18.09, -15.98, "Nouakchott, Mauritania"),
-]
-
 
 def seed_central_jobs() -> None:
-    """Ensure tomorrow is monitored for every centrally covered location."""
+    """Ensure one current target per active forecast cell, not per settlement."""
     target = (datetime.now(timezone.utc) + timedelta(days=1)).date()
-    for lat, lon, _ in CENTRAL_LOCATIONS:
+    cells = list_active_forecast_cells()
+    locations = [(float(cell["lat"]), float(cell["lon"]), cell["name"]) for cell in cells]
+    for lat, lon, _ in locations:
+        cancel_superseded_jobs(lat, lon, target)
         ensure_monitoring_job(lat, lon, target)
 
 
 async def process_job(job: dict) -> None:
+    started = time.monotonic()
     target = datetime.combine(job["target_date"], datetime.min.time(), tzinfo=timezone.utc)
     result = await progressive_predict(float(job["lat"]), float(job["lon"]), target)
+    if not monitoring_job_is_running(str(job["id"])):
+        print(
+            f"Discarded superseded central prediction job={job['id']} "
+            f"target={job['target_date']}",
+            flush=True,
+        )
+        return
     updates = result.get("history", [])
     previous_level = updates[-2]["alert_level"] if len(updates) >= 2 else None
     snapshot = save_snapshot({
@@ -67,6 +68,13 @@ async def process_job(job: dict) -> None:
     record_environmental_evidence(result)
     create_alert_level_event(job["tracking_key"], snapshot["id"], previous_level, result)
     reschedule_job(str(job["id"]), snapshot["id"], job["target_date"])
+    print(
+        f"Central prediction stored location={result['location_name']!r} "
+        f"target={result['target_date']} snapshot={snapshot['id']} "
+        f"probability={result['probability']:.4f} "
+        f"duration_seconds={time.monotonic() - started:.2f}",
+        flush=True,
+    )
 
 
 async def run_forever() -> None:

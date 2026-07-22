@@ -7,7 +7,6 @@ import httpx
 from fastapi import Cookie, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # Load deployment/local configuration before importing storage modules, which
@@ -23,6 +22,25 @@ from auth_store import AuthError, confirm_account_deletion, request_account_dele
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
 from rate_limit import RateLimitExceeded, enforce_rate_limit
 from observability import configure_logging, log_event
+from coverage_store import coverage_status, list_covered_places, nearest_covered_place
+from firebase_auth import create_firebase_session, delete_firebase_account, firebase_configured
+from sms_provider import alert_provider_name, twilio_configured
+from model import (
+    AccountDeletionConfirmation,
+    AccountDeletionRequest,
+    CurrentConditionsResponse,
+    DailyHorizonPrediction,
+    DailyHorizonResponse,
+    ForecastDay,
+    FirebaseAccountDeletion,
+    FirebaseSessionRequest,
+    HistoricalSnapshot,
+    LocationPrediction,
+    MultiDayForecast,
+    OtpRequest,
+    OtpVerification,
+    SubscriptionRequest,
+)
 
 HF_SPACE_URL = os.getenv(
     "HF_SPACE_URL", "https://mavencodes-saheldust-api.hf.space/predict"
@@ -68,111 +86,6 @@ async def unhandled_api_error(request: Request, exc: Exception):
     )
 
 
-class LocationPrediction(BaseModel):
-    lat: float
-    lon: float
-    location_name: str
-    probability: float
-    risk_level: str
-    dust_event: bool
-    prediction_date: str
-    data_source: str
-    current_conditions: dict
-    surface_data: dict
-    input_quality: dict
-
-
-class ForecastDay(BaseModel):
-    date: str
-    probability: float
-    risk_level: str
-    dust_event: bool
-
-
-class MultiDayForecast(BaseModel):
-    lat: float
-    lon: float
-    location_name: str
-    generated_at: str
-    days: list[ForecastDay]
-
-
-class HistoricalSnapshot(BaseModel):
-    id: str
-    lat: float
-    lon: float
-    location_name: str
-    target_date: str
-    recorded_at: str
-    probability: float
-    alert_level: str
-    dust_event: bool
-    data_source: str
-    model_version: str | None = None
-
-
-class DailyHorizonPrediction(BaseModel):
-    horizon: str
-    target_date: str
-    approximate_lead_time: str
-    probability: float
-    alert_level: str
-    dust_event: bool
-
-
-class DailyHorizonResponse(BaseModel):
-    lat: float
-    lon: float
-    location_name: str
-    reference_date: str
-    generated_at: str
-    model_version: str | None = None
-    current_conditions: dict
-    surface_data: dict
-    horizons: list[DailyHorizonPrediction]
-
-
-class CurrentConditionsResponse(BaseModel):
-    lat: float
-    lon: float
-    location_name: str
-    current_conditions: dict
-
-
-class OtpRequest(BaseModel):
-    phone: str
-    purpose: str
-    device_id: str | None = None
-
-
-class PreferredLocation(BaseModel):
-    name: str
-    lat: float
-    lon: float
-
-
-class OtpVerification(BaseModel):
-    challenge_id: str
-    code: str
-    preferred_location: PreferredLocation | None = None
-
-
-class AccountDeletionRequest(BaseModel):
-    device_id: str | None = None
-
-
-class AccountDeletionConfirmation(BaseModel):
-    challenge_id: str
-    code: str
-
-
-class SubscriptionRequest(BaseModel):
-    lat: float
-    lon: float
-    location_name: str
-    threshold: str = "warning"
-
-
 def _request_ip(request: Request) -> str | None:
     forwarded = request.headers.get("x-forwarded-for")
     return forwarded.split(",", 1)[0].strip() if forwarded else (request.client.host if request.client else None)
@@ -194,9 +107,9 @@ def probability_to_alert(probability: float) -> str:
 
 def validate_sahel_point(lat: float, lon: float) -> None:
     if not (10 <= lat <= 25):
-        raise HTTPException(400, "Latitude must be between 10 and 25 (validated Sahel region)")
+        raise HTTPException(400, "Latitude must be between 10 and 25 (configured Sahel region)")
     if not (-18 <= lon <= 25):
-        raise HTTPException(400, "Longitude must be between -18 and 25 (validated Sahel region)")
+        raise HTTPException(400, "Longitude must be between -18 and 25 (configured Sahel region)")
 
 
 @app.get("/")
@@ -208,6 +121,28 @@ async def root():
     }
 
 
+@app.get("/api/v1/coverage/places")
+async def coverage_places(q: str | None = None, country: str | None = None, limit: int = 250):
+    """List database-backed communities mapped to centrally monitored cells."""
+    if q is not None and len(q.strip()) > 80:
+        raise HTTPException(400, "Search text is too long")
+    country_code = country.strip().upper() if country else None
+    if country_code and (len(country_code) != 2 or not country_code.isalpha()):
+        raise HTTPException(400, "country must be a two-letter country code")
+    places = list_covered_places(q.strip() if q and q.strip() else None, country_code, limit)
+    return {"places": places, "count": len(places)}
+
+
+@app.get("/api/v1/coverage/nearest")
+async def coverage_nearest(lat: float, lon: float):
+    """Map device coordinates to the nearest monitored community and grid cell."""
+    validate_sahel_point(lat, lon)
+    place = nearest_covered_place(lat, lon)
+    if not place:
+        raise HTTPException(503, "No forecast locations are currently available")
+    return {"place": place}
+
+
 @app.get("/api/v1/health")
 async def health():
     storage = database_status()
@@ -217,17 +152,63 @@ async def health():
         operations = operational_status()
     except Exception as exc:
         operations = {"available": False, "error": type(exc).__name__}
+    try:
+        operations["coverage"] = coverage_status()
+    except Exception as exc:
+        operations["coverage"] = {"available": False, "error": type(exc).__name__}
     return {
         "status": "ok", "database": storage,
         "earth_engine": {"available": GEE_AVAILABLE},
         "model": {"configured": bool(HF_SPACE_URL)},
+        "authentication": {
+            "provider": "firebase" if firebase_configured() else "legacy_otp",
+            "firebase_configured": firebase_configured(),
+        },
         "sms": {
-            "configured": bool(os.getenv("AFRICASTALKING_USERNAME") and os.getenv("AFRICASTALKING_API_KEY")),
-            "mode": "sandbox" if os.getenv("AFRICASTALKING_SANDBOX", "false").lower() == "true" else "live",
-            "sender_configured": bool(os.getenv("AFRICASTALKING_SENDER_ID", "").strip()),
+            "provider": alert_provider_name(),
+            "configured": twilio_configured() if alert_provider_name() == "twilio" else bool(os.getenv("AFRICASTALKING_USERNAME") and os.getenv("AFRICASTALKING_API_KEY")),
+            "sender_configured": bool(os.getenv("TWILIO_MESSAGING_SERVICE_SID") or os.getenv("TWILIO_FROM_NUMBER")) if alert_provider_name() == "twilio" else bool(os.getenv("AFRICASTALKING_SENDER_ID", "").strip()),
         },
         "operations": operations,
     }
+
+
+@app.post("/api/v1/auth/firebase/session")
+async def auth_firebase_session(payload: FirebaseSessionRequest, request: Request, response: Response):
+    location = payload.preferred_location.model_dump() if payload.preferred_location else None
+    if location:
+        validate_sahel_point(location["lat"], location["lon"])
+    try:
+        result = create_firebase_session(
+            payload.id_token, payload.purpose, location, payload.device_id, _request_ip(request)
+        )
+    except AuthError as exc:
+        raise _auth_error(exc) from exc
+    response.set_cookie(
+        "sahelwatch_session", result["token"], httponly=True, secure=True,
+        samesite="none", max_age=30 * 86400, path="/",
+    )
+    return {
+        "authenticated": True, "phone_uid": result["phone_uid"],
+        "firebase_uid": result["firebase_uid"], "expires_at": result["expires_at"].isoformat(),
+    }
+
+
+@app.post("/api/v1/auth/firebase/account/delete")
+async def auth_delete_firebase_account(
+    payload: FirebaseAccountDeletion,
+    response: Response,
+    sahelwatch_session: str | None = Cookie(default=None),
+):
+    try:
+        user = require_session(sahelwatch_session)
+        if user.get("auth_provider") != "firebase":
+            raise AuthError(409, "This account still uses the previous verification service")
+        delete_firebase_account(user, payload.id_token)
+    except AuthError as exc:
+        raise _auth_error(exc) from exc
+    response.delete_cookie("sahelwatch_session", path="/", secure=True, samesite="none")
+    return {"deleted": True}
 
 
 @app.post("/api/v1/auth/request-otp")
@@ -487,17 +468,17 @@ async def forecast(lat: float, lon: float, days: int = 3):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     forecast_days = []
-    for day_data in forecast_data:
-        if "error" in day_data:
-            forecast_days.append(ForecastDay(
-                date=day_data["date"],
-                probability=0.0,
-                risk_level="unavailable",
-                dust_event=False,
-            ))
-            continue
+    async with httpx.AsyncClient(timeout=30) as client:
+        for day_data in forecast_data:
+            if "error" in day_data:
+                forecast_days.append(ForecastDay(
+                    date=day_data["date"],
+                    probability=0.0,
+                    risk_level="unavailable",
+                    dust_event=False,
+                ))
+                continue
 
-        async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 HF_SPACE_URL,
                 json={
@@ -506,21 +487,21 @@ async def forecast(lat: float, lon: float, days: int = 3):
                 },
             )
 
-        if response.status_code == 200:
-            result = response.json()
-            forecast_days.append(ForecastDay(
-                date=day_data["date"],
-                probability=result["probability"],
-                risk_level=result["risk_level"],
-                dust_event=result["dust_event"],
-            ))
-        else:
-            forecast_days.append(ForecastDay(
-                date=day_data["date"],
-                probability=0.0,
-                risk_level="error",
-                dust_event=False,
-            ))
+            if response.status_code == 200:
+                result = response.json()
+                forecast_days.append(ForecastDay(
+                    date=day_data["date"],
+                    probability=result["probability"],
+                    risk_level=result["risk_level"],
+                    dust_event=result["dust_event"],
+                ))
+            else:
+                forecast_days.append(ForecastDay(
+                    date=day_data["date"],
+                    probability=0.0,
+                    risk_level="error",
+                    dust_event=False,
+                ))
 
     return MultiDayForecast(
         lat=lat,
@@ -586,10 +567,19 @@ async def active_alerts():
 async def latest_prediction(lat: float, lon: float):
     """Read the latest centrally stored result without triggering inference."""
     validate_sahel_point(lat, lon)
-    snapshots = query_recent_snapshots(lat, lon, 1)
+    central_target = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    snapshots = query_snapshots(lat, lon, central_target)
+    # During the short midnight rollover, keep serving the last completed
+    # central result until the worker stores the first new target-day revision.
+    if not snapshots:
+        snapshots = query_recent_snapshots(lat, lon, 1)
     if not snapshots:
         raise HTTPException(404, "No central prediction has been recorded for this location yet")
     snapshot = snapshots[0]
+    recorded_at = datetime.fromisoformat(snapshot["recorded_at"].replace("Z", "+00:00"))
+    age_minutes = max(
+        0, round((datetime.now(timezone.utc) - recorded_at).total_seconds() / 60, 1)
+    )
     surface = snapshot.get("metadata", {}).get("surface_data")
     evidence = query_latest_environmental_evidence(lat, lon)
     if not surface and evidence:
@@ -598,7 +588,36 @@ async def latest_prediction(lat: float, lon: float):
             "vegetation_water_content": evidence.get("vegetation_water_content"),
             "prev_day_aod": evidence.get("aod"),
         }
-    return {"prediction": snapshot, "surface_data": surface, "evidence": evidence}
+    conditions = None
+    if evidence:
+        wind_ms = evidence.get("wind_speed_ms")
+        conditions = {
+            "observed_at": evidence.get("observed_at"),
+            "wind_speed_ms": wind_ms,
+            "wind_speed_kmh": round(wind_ms * 3.6, 1) if wind_ms is not None else None,
+            "wind_direction_deg": evidence.get("wind_direction_deg"),
+            "temperature_c": evidence.get("temperature_c"),
+            "dewpoint_c": evidence.get("dewpoint_c"),
+            "surface_pressure_hpa": evidence.get("surface_pressure_hpa"),
+            "precipitation_mm": evidence.get("precipitation_mm"),
+            "soil_moisture": evidence.get("soil_moisture"),
+            "vegetation_water_content": evidence.get("vegetation_water_content"),
+            "aod": evidence.get("aod"),
+        }
+    return {
+        "prediction": snapshot,
+        "surface_data": surface,
+        "current_conditions": conditions,
+        "freshness": {
+            "recorded_at": snapshot["recorded_at"],
+            "age_minutes": age_minutes,
+            "stale": age_minutes > 90,
+            "source": "central-hourly-worker",
+            "target_date": snapshot["target_date"],
+            "current_central_target": central_target.isoformat(),
+        },
+        "evidence": evidence,
+    }
 
 
 # PENDING: Re-enable this route decorator only after final model evaluation and

@@ -183,7 +183,8 @@ def session_user(token: str | None) -> dict[str, Any] | None:
         return None
     with _postgres_connection() as connection:
         row = connection.execute(
-            """SELECT i.phone_uid,i.preferred_lat,i.preferred_lon,i.preferred_location_name
+            """SELECT i.phone_uid,i.firebase_uid,i.auth_provider,
+                      i.preferred_lat,i.preferred_lon,i.preferred_location_name
                FROM user_sessions s JOIN alert_identities i USING(phone_uid)
                WHERE s.token_hash=%s AND s.revoked_at IS NULL AND s.expires_at>now()""",
             (_token_hash(token),),
@@ -249,4 +250,5 @@ def confirm_account_deletion(token: str | None, challenge_id: str, code: str) ->
 
 
 async def send_alert_sms(phone_uid: str, message: str) -> str | None:
+    """Legacy adapter retained only until the Firebase/Twilio rollout is verified."""
     return await _send_sms(phone_uid, message)

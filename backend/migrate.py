@@ -18,7 +18,11 @@ def main() -> None:
     try:
         import psycopg
     except ImportError as exc:
-        raise SystemExit("Install backend requirements before running migrations") from exc
+        raise SystemExit(
+            "PostgreSQL driver could not load. Install the pinned binary driver with "
+            "`python -m pip install \"psycopg[binary]==3.3.4\"`. "
+            f"Original error: {exc}"
+        ) from exc
 
     migrations = sorted(Path(__file__).with_name("migrations").glob("[0-9][0-9][0-9]_*.sql"))
     with psycopg.connect(database_url, connect_timeout=15) as connection:

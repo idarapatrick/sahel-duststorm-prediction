@@ -13,18 +13,17 @@ import json
 import os
 import asyncio
 import httpx
-import numpy as np
 from datetime import datetime, timedelta, timezone
 from data_pipeline import (
-    _fetch_openmeteo_forecast,
-    _extract_72h_window,
-    _extract_soil_moisture,
-    _fetch_smap_gee,
-    _fetch_modis_aod_gee,
+    build_prediction_inputs,
     get_location_name,
-    GEE_AVAILABLE,
 )
-from history_store import load_progressive_state, query_active_progressive_states, save_progressive_state
+from history_store import (
+    load_progressive_state,
+    purge_expired,
+    query_active_progressive_states,
+    save_progressive_state,
+)
 
 HF_SPACE_URL = os.getenv(
     "HF_SPACE_URL", "https://mavencodes-saheldust-api.hf.space/predict"
@@ -36,9 +35,6 @@ ALERT_LEVELS = {
     "warning": {"min_prob": 0.5, "max_prob": 0.7, "label": "Dust event likely"},
     "alert": {"min_prob": 0.7, "max_prob": 1.0, "label": "Dust event imminent"},
 }
-
-tracked_predictions = {}
-
 
 def get_alert_level(probability: float) -> dict:
     for level_name, thresholds in ALERT_LEVELS.items():
@@ -161,45 +157,13 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
         hours_real = max(0, int((now - window_start).total_seconds() / 3600))
         hours_forecast = 72 - hours_real
 
-    raw_data = await loop.run_in_executor(
-        None, _fetch_openmeteo_forecast, lat, lon, target_date
+    atmospheric, surface, provenance, raw_data = await build_prediction_inputs(
+        lat, lon, target_date, loop
     )
-    atmospheric = _extract_72h_window(raw_data, target_date)
-
-    sm = _extract_soil_moisture(raw_data, target_date)
-    vwc = 0.0
-    prev_aod = 0.0
-    smap_observed_at = None
-    aod_observed_at = None
-    soil_source = "open-meteo-forecast"
-
-    if GEE_AVAILABLE:
-        for offset in range(0, 8):
-            smap_date = target_date - timedelta(days=offset)
-            sm_gee, vwc_gee = await loop.run_in_executor(
-                None, _fetch_smap_gee, lat, lon, smap_date
-            )
-            if sm_gee is not None:
-                sm = sm_gee
-                vwc = vwc_gee if vwc_gee is not None else 0.0
-                smap_observed_at = smap_date.strftime("%Y-%m-%d")
-                soil_source = "smap"
-                break
-
-        for offset in range(1, 8):
-            aod_date = target_date - timedelta(days=offset)
-            aod = await loop.run_in_executor(
-                None, _fetch_modis_aod_gee, lat, lon, aod_date
-            )
-            if aod > 0:
-                prev_aod = aod
-                aod_observed_at = aod_date.strftime("%Y-%m-%d")
-                break
-
-    month = target_date.month
-    month_sin = float(np.sin(2 * np.pi * month / 12))
-    month_cos = float(np.cos(2 * np.pi * month / 12))
-    surface = [sm, vwc, prev_aod, lat, lon, month_sin, month_cos]
+    sm, vwc, prev_aod = surface[:3]
+    smap_observed_at = provenance["soil_moisture"]["observed_at"]
+    aod_observed_at = provenance["previous_day_aod"]["observed_at"]
+    soil_source = provenance["soil_moisture"]["source"]
     conditions = _current_conditions(raw_data, now, surface)
 
     model_result = await run_prediction(atmospheric, surface)
@@ -218,21 +182,17 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
         "prev_day_aod": round(prev_aod, 4),
     }
 
-    if target_key not in tracked_predictions:
-        persisted = load_progressive_state(target_key)
-        tracked_predictions[target_key] = persisted or {
-            "lat": lat,
-            "lon": lon,
-            "location_name": location_name,
-            "target_date": target_date.strftime("%Y-%m-%d"),
-            "target_time": target_time.strftime("%Y-%m-%dT%H:00Z"),
-            "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "updates": [],
-            "current_alert": current_alert,
-            "trend": "new",
-        }
-
-    history = tracked_predictions[target_key]
+    history = load_progressive_state(target_key) or {
+        "lat": lat,
+        "lon": lon,
+        "location_name": location_name,
+        "target_date": target_date.strftime("%Y-%m-%d"),
+        "target_time": target_time.strftime("%Y-%m-%dT%H:00Z"),
+        "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "updates": [],
+        "current_alert": current_alert,
+        "trend": "new",
+    }
     previous_updates = history["updates"]
 
     if len(previous_updates) > 0:
@@ -348,18 +308,9 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
 
 
 def get_all_tracked() -> list:
-    persisted = query_active_progressive_states()
-    return persisted or list(tracked_predictions.values())
+    return query_active_progressive_states()
 
 
 def clear_expired():
-    now = datetime.now(timezone.utc)
-    expired = []
-    for key, pred in tracked_predictions.items():
-        target = datetime.strptime(pred["target_date"], "%Y-%m-%d")
-        target = target.replace(tzinfo=timezone.utc)
-        if now - target > timedelta(days=1):
-            expired.append(key)
-    for key in expired:
-        del tracked_predictions[key]
-    return len(expired)
+    """Remove expired durable state using the configured retention policy."""
+    purge_expired()

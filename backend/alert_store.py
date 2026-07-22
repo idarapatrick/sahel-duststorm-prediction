@@ -168,7 +168,7 @@ def begin_delivery(event_id: str, phone_uid: str, snapshot_id: str | None) -> st
     return None if row["status"] == "delivered" else str(row["id"])
 
 
-def finish_delivery(delivery_id: str, provider_id: str | None) -> None:
+def finish_delivery(delivery_id: str, provider_id: str | None, provider: str = "africastalking") -> None:
     with _postgres_connection() as connection:
         row = connection.execute(
             """UPDATE alert_deliveries SET status='delivered',provider_message_id=%s,
@@ -176,8 +176,8 @@ def finish_delivery(delivery_id: str, provider_id: str | None) -> None:
         ).fetchone()
         if row:
             connection.execute(
-                """INSERT INTO sms_messages(phone_uid,category,provider_message_id,status)
-                   VALUES (%s,'alert',%s,'delivered')""", (row["phone_uid"], provider_id)
+                """INSERT INTO sms_messages(phone_uid,category,provider,provider_message_id,status)
+                   VALUES (%s,'alert',%s,%s,'delivered')""", (row["phone_uid"], provider, provider_id)
             )
 
 

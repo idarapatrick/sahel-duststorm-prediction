@@ -11,7 +11,7 @@ from typing import Any
 from history_store import _postgres_connection, _using_postgres
 
 WORKER_ID = os.getenv("WORKER_ID", f"{socket.gethostname()}-{os.getpid()}")
-MONITOR_INTERVAL_HOURS = max(1, int(os.getenv("MONITOR_INTERVAL_HOURS", "6")))
+MONITOR_INTERVAL_HOURS = max(1, int(os.getenv("MONITOR_INTERVAL_HOURS", "1")))
 MONITOR_RETRY_MINUTES = max(1, int(os.getenv("MONITOR_RETRY_MINUTES", "15")))
 MONITOR_MAX_ATTEMPTS = max(1, int(os.getenv("MONITOR_MAX_ATTEMPTS", "8")))
 
@@ -59,6 +59,24 @@ def ensure_monitoring_job(
     return str(row["id"]) if row else None
 
 
+def cancel_superseded_jobs(lat: float, lon: float, target_date: date) -> int:
+    """Keep one central target active when the calendar day rolls forward."""
+    if not _using_postgres():
+        return 0
+    with _postgres_connection() as connection:
+        result = connection.execute(
+            """UPDATE monitoring_jobs
+               SET status='cancelled', completed_at=now(), locked_at=NULL,
+                   locked_by=NULL, last_error='Superseded by the current central target',
+                   updated_at=now()
+               WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+                 AND target_date <> %s
+                 AND status IN ('pending','running','failed')""",
+            (lat - 0.001, lat + 0.001, lon - 0.001, lon + 0.001, target_date),
+        )
+        return result.rowcount
+
+
 def recover_stale_jobs(lock_timeout_minutes: int = 30) -> int:
     if not _using_postgres():
         return 0
@@ -96,17 +114,30 @@ def claim_due_job(worker_id: str = WORKER_ID) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def monitoring_job_is_running(job_id: str) -> bool:
+    """Confirm that a claimed job was not superseded during inference."""
+    with _postgres_connection() as connection:
+        row = connection.execute(
+            "SELECT status FROM monitoring_jobs WHERE id=%s", (job_id,)
+        ).fetchone()
+    return bool(row and row["status"] == "running")
+
+
 def reschedule_job(job_id: str, snapshot_id: str, target_date: date) -> None:
     _, window_end = monitoring_window(target_date)
     now = datetime.now(timezone.utc)
     terminal = now >= window_end
-    next_run = min(now + timedelta(hours=MONITOR_INTERVAL_HOURS), window_end)
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+    next_run = min(
+        current_hour + timedelta(hours=MONITOR_INTERVAL_HOURS), window_end
+    )
     with _postgres_connection() as connection:
         connection.execute(
             """UPDATE monitoring_jobs
                SET status=%s, next_run_at=%s, locked_at=NULL, locked_by=NULL,
                    attempts=0, last_error=NULL, last_snapshot_id=%s,
-                   completed_at=%s, updated_at=now() WHERE id=%s""",
+                   completed_at=%s, updated_at=now()
+               WHERE id=%s AND status='running'""",
             (
                 "completed" if terminal else "pending",
                 next_run,
@@ -127,7 +158,8 @@ def fail_job(job_id: str, error: Exception) -> None:
         connection.execute(
             """UPDATE monitoring_jobs SET status=%s, next_run_at=%s,
                       locked_at=NULL, locked_by=NULL, last_error=%s,
-                      completed_at=%s, updated_at=now() WHERE id=%s""",
+                      completed_at=%s, updated_at=now()
+               WHERE id=%s AND status='running'""",
             (
                 "cancelled" if terminal else "failed",
                 datetime.now(timezone.utc) + timedelta(minutes=MONITOR_RETRY_MINUTES),
@@ -154,14 +186,15 @@ def record_environmental_evidence(result: dict[str, Any]) -> None:
         connection.execute(
             """INSERT INTO environmental_observations
                (location_id, observed_at, source, value_kind, wind_speed_ms,
-                wind_direction_deg, temperature_c, surface_pressure_hpa,
+                wind_direction_deg, temperature_c, dewpoint_c, surface_pressure_hpa,
                 precipitation_mm, soil_moisture, vegetation_water_content, aod,
                 raw_payload)
-               VALUES (%s,%s,'open-meteo+gee','observed',%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               VALUES (%s,%s,'open-meteo+gee','observed',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (location_id, observed_at, source, value_kind) DO NOTHING""",
             (
                 location["id"], observed_at, conditions.get("wind_speed_ms"),
                 conditions.get("wind_direction_deg"), conditions.get("temperature_c"),
+                conditions.get("dewpoint_c"),
                 conditions.get("surface_pressure_hpa"), conditions.get("precipitation_mm"),
                 surface.get("soil_moisture"), surface.get("vegetation_water_content"),
                 surface.get("prev_day_aod"), Jsonb({"input_quality": result.get("input_quality")}),
