@@ -7,16 +7,13 @@
 	import { ApiRequestError, confirmAccountDeletion, deleteFirebaseAccount, demoPrediction, getActiveAlerts, getAuthState, getCoveredLocations, getHistory, getLatestPrediction, getNotifications, getRecentHistory, logout, requestAccountDeletionOtp, saveAlertSubscription } from '$lib/api';
 	import { finishFirebasePhoneVerification, signOutFirebase, startFirebasePhoneVerification } from '$lib/firebase';
 	import type { ConfirmationResult } from 'firebase/auth';
-	import type { ActiveAlert, AuthState, DailyHorizonResponse, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence } from '$lib/types';
+	import type { ActiveAlert, AuthState, HistoricalSnapshot, Location, Prediction } from '$lib/types';
 
 	let selected = DEFAULT_LOCATION;
 	let locations: Location[] = fallbackLocations;
 	let prediction: Prediction = demoPrediction(selected);
 	let history: HistoricalSnapshot[] = [];
 	let recentHistory: HistoricalSnapshot[] = [];
-	let dailyHorizons: DailyHorizonResponse | null = null;
-	let progressive: ProgressiveEvidence | null = null;
-	let selectedHorizon: 'day+0' | 'day+1' | 'day+2' = 'day+0';
 	let activeAlerts: ActiveAlert[] = [];
 	let userNotifications: any[] = [];
 	let alertThreshold: 'watch' | 'warning' | 'alert' = 'warning';
@@ -39,7 +36,9 @@
 	let online = true;
 	let locationRequest = 0;
 	let fetchingPrediction = false;
+	let loadingProgress = 0;
 	let predictionLoadState: 'loading' | 'ready' | 'pending' | 'offline' = 'loading';
+	let selectedDay: 'today' | 'tomorrow' | 'day-after' = 'today';
 	let coverageLoading = true;
 	let coverageError = '';
 	let historyLoading = false;
@@ -48,21 +47,33 @@
 	let searchDate = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
 	const today = new Date().toISOString().slice(0, 10);
 	const minDate = new Date(Date.now() - 89 * 86400000).toISOString().slice(0, 10);
-	const dailyHorizonNames = ['day+0', 'day+1', 'day+2'] as const;
-	// Keep the UI visible but inactive until final model evaluation and ONNX export.
-	const multiHorizonComingSoon = true;
-
-	$: probability = Math.round(prediction.probability * 100);
-	$: riskCopy = prediction.available === false ? 'Prediction temporarily unavailable' : prediction.riskLevel === 'clear' ? 'No significant storm expected' : prediction.riskLevel === 'watch' ? 'Dust activity is possible' : prediction.riskLevel === 'warning' ? 'Dust storm conditions are likely' : 'Severe dust event expected';
-	$: riskTone = prediction.riskLevel;
-	$: horizon = dailyHorizons?.horizons.find((x) => x.horizon === selectedHorizon) || dailyHorizons?.horizons[0];
-	$: currentOutlook = prediction.outlooks?.find((item) => item.targetDate === today);
 	$: nextOutlookDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 	$: nextOutlook = prediction.outlooks?.find((item) => item.targetDate === nextOutlookDate);
-	$: conditions = dailyHorizons?.conditions || progressive?.conditions || prediction.conditions;
-	$: aodEvidence = prediction.environmentalEvidence?.find((item) => item.variableName === 'previous_day_aod');
-	$: soilEvidence = prediction.environmentalEvidence?.find((item) => item.variableName === 'soil_moisture');
-	$: aodQuality = prediction.inputQuality?.fields?.previous_day_aod;
+	$: dayAfterDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+	$: selectedTargetDate = selectedDay === 'today' ? today : selectedDay === 'tomorrow' ? nextOutlookDate : dayAfterDate;
+	$: selectedOutlook = prediction.outlooks?.find((item) => item.targetDate === selectedTargetDate);
+	$: activePrediction = selectedDay === 'today' ? prediction : selectedOutlook ? {
+		...prediction,
+		probability: selectedOutlook.probability,
+		riskLevel: selectedOutlook.riskLevel,
+		predictionDate: selectedOutlook.targetDate,
+		conditions: selectedOutlook.conditions,
+		surfaceData: selectedOutlook.surfaceData,
+		environmentalEvidence: selectedOutlook.environmentalEvidence,
+		inputQuality: undefined,
+		evidenceSummary: selectedOutlook.inputCompleteness == null ? undefined : {
+			inputCompleteness: selectedOutlook.inputCompleteness,
+			observedFraction: selectedOutlook.observedFraction ?? 0,
+			forecastFraction: selectedOutlook.forecastFraction ?? 0
+		}
+	} : demoPrediction(selected);
+	$: probability = Math.round(activePrediction.probability * 100);
+	$: riskCopy = activePrediction.available === false ? 'Prediction temporarily unavailable' : activePrediction.riskLevel === 'clear' ? 'No significant storm expected' : activePrediction.riskLevel === 'watch' ? 'Dust activity is possible' : activePrediction.riskLevel === 'warning' ? 'Dust storm conditions are likely' : 'Severe dust event expected';
+	$: riskTone = activePrediction.riskLevel;
+	$: conditions = activePrediction.conditions;
+	$: aodEvidence = activePrediction.environmentalEvidence?.find((item) => item.variableName === 'previous_day_aod');
+	$: soilEvidence = activePrediction.environmentalEvidence?.find((item) => item.variableName === 'soil_moisture');
+	$: aodQuality = activePrediction.inputQuality?.fields?.previous_day_aod;
 	$: aodAvailable = aodEvidence
 		? aodEvidence.qualityStatus === 'valid' && aodEvidence.value != null
 		: aodQuality?.available === true;
@@ -72,15 +83,15 @@
 		: aodSource === 'cams-global'
 			? 'Latest global atmospheric analysis'
 			: 'Latest available particle reading';
-	$: soilMoistureValue = conditions?.soilMoisture ?? progressive?.soilMoisture;
-	$: aodValue = conditions?.aod ?? progressive?.aod;
-	$: qualityFields = prediction.inputQuality?.fields;
-	$: confirmedMissingReadings = prediction.environmentalEvidence?.length
+	$: soilMoistureValue = conditions?.soilMoisture;
+	$: aodValue = conditions?.aod;
+	$: qualityFields = activePrediction.inputQuality?.fields;
+	$: confirmedMissingReadings = activePrediction.environmentalEvidence?.length
 		? [
 			['soil_moisture', 'soil moisture'],
 			['vegetation_water_content', 'vegetation water content'],
 			['previous_day_aod', 'AOD particle reading']
-		].filter(([key]) => prediction.environmentalEvidence?.some(
+		].filter(([key]) => activePrediction.environmentalEvidence?.some(
 			(item) => item.variableName === key && ['missing', 'invalid', 'stale'].includes(item.qualityStatus)
 		)).map(([, label]) => label)
 		: qualityFields
@@ -93,6 +104,19 @@
 	$: confirmedMissingMessage = confirmedMissingReadings.length === 1
 		? `${confirmedMissingReadings[0]} is unavailable for this update.`
 		: `${confirmedMissingReadings.slice(0, -1).join(', ')} and ${confirmedMissingReadings.at(-1)} are unavailable for this update.`;
+	$: availableDayEvidence = activePrediction.environmentalEvidence?.filter(
+		(item) => item.value != null && item.qualityStatus === 'valid'
+	) ?? [];
+	$: recordedEvidenceCount = availableDayEvidence.filter(
+		(item) => ['observation', 'delayed_observation', 'analysis'].includes(item.kind)
+	).length;
+	$: forecastEvidenceCount = availableDayEvidence.filter((item) => item.kind === 'forecast').length;
+	$: recordedEvidencePercent = availableDayEvidence.length
+		? Math.round((recordedEvidenceCount / availableDayEvidence.length) * 100)
+		: 0;
+	$: forecastEvidencePercent = availableDayEvidence.length
+		? Math.round((forecastEvidenceCount / availableDayEvidence.length) * 100)
+		: 0;
 
 	function windExplanation(speed: number | null | undefined) {
 		if (speed == null) return 'No verified wind reading for this update';
@@ -133,17 +157,30 @@
 	async function loadLocation(location: Location) {
 		const requestNumber = ++locationRequest;
 		fetchingPrediction = true;
+		loadingProgress = 8;
 		predictionLoadState = 'loading';
+		selectedDay = 'today';
 		selected = location; history = []; historyMessage = '';
 		localStorage.setItem('sahelwatch:location', JSON.stringify(location));
 		prediction = demoPrediction(location);
-		const central = await getLatestPrediction(location).then(
-			(value) => ({ ok: true as const, value }),
-			(error: unknown) => ({ ok: false as const, error })
-		);
+		const progressTimer = window.setInterval(() => {
+			if (requestNumber === locationRequest) loadingProgress = Math.min(92, loadingProgress + 3);
+		}, 350);
+		let central: { ok: true; value: Prediction } | { ok: false; error: unknown } = {
+			ok: false, error: new Error('Prediction retrieval did not complete')
+		};
+		while (requestNumber === locationRequest) {
+			central = await getLatestPrediction(location).then(
+				(value) => ({ ok: true as const, value }),
+				(error: unknown) => ({ ok: false as const, error })
+			);
+			if (central.ok && central.value.predictionDate === today) break;
+			await new Promise((resolve) => window.setTimeout(resolve, 1200));
+		}
+		window.clearInterval(progressTimer);
 		if (requestNumber !== locationRequest) return;
 		const isCurrentDay = central.ok && central.value.predictionDate === today;
-		if (isCurrentDay) {
+		if (central.ok && central.value.predictionDate === today) {
 			prediction = central.value;
 		} else if (central.ok) {
 			const returnedOutlook = {
@@ -169,8 +206,9 @@
 				? 'pending'
 				: 'offline';
 		online = central.ok;
-		progressive = null;
-		dailyHorizons = null;
+		loadingProgress = 100;
+		await new Promise((resolve) => window.setTimeout(resolve, 280));
+		if (requestNumber !== locationRequest) return;
 		fetchingPrediction = false;
 		loadRecentHistory();
 	}
@@ -182,18 +220,24 @@
 	async function loadCoverage() {
 		coverageLoading = true;
 		coverageError = '';
-		try {
-			const covered = await getCoveredLocations();
-			if (!covered.length) throw new Error('No covered communities were returned.');
-			locations = covered;
-			if (!covered.some((location) => location.name === selected.name && location.country === selected.country)) {
-				selected = covered[0];
+		for (let attempt = 0; attempt < 3; attempt += 1) {
+			try {
+				const covered = await getCoveredLocations();
+				if (!covered.length) throw new Error('No covered communities were returned.');
+				locations = covered;
+				localStorage.setItem('sahelwatch:covered_locations', JSON.stringify(covered));
+				if (!covered.some((location) => location.name === selected.name && location.country === selected.country)) {
+					selected = covered[0];
+				}
+				coverageLoading = false;
+				return;
+			} catch {
+				if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 1000));
 			}
-		} catch {
-			coverageError = 'Check that the SahelWatch backend is running, then try again.';
-		} finally {
-			coverageLoading = false;
 		}
+		coverageError = 'The location catalogue is still reconnecting.';
+		coverageLoading = false;
+		window.setTimeout(loadCoverage, 10_000);
 	}
 	async function refreshCentralPrediction() {
 		try {
@@ -267,6 +311,13 @@
 		if (new URLSearchParams(window.location.search).get('tab') === 'settings') activeTab = 'settings';
 		import('$lib/components/PredictionMap.svelte').then((module) => PredictionMapComponent = module.default);
 		deviceId = localStorage.getItem('sahelwatch:device_id') || crypto.randomUUID(); localStorage.setItem('sahelwatch:device_id', deviceId);
+		const cachedCoverage = localStorage.getItem('sahelwatch:covered_locations');
+		if (cachedCoverage) {
+			try {
+				const parsed = JSON.parse(cachedCoverage);
+				if (Array.isArray(parsed) && parsed.length > 1) locations = parsed;
+			} catch { /* The live catalogue will replace an invalid cache. */ }
+		}
 		loadCoverage();
 		const savedLocation = localStorage.getItem('sahelwatch:location');
 		if (savedLocation) { try { selected = JSON.parse(savedLocation); } catch { /* use default */ } }
@@ -311,21 +362,39 @@
 	</nav>
 
 	<main id="main-content">
+		{#if !fetchingPrediction && activeTab === 'overview'}
+			<section class="day-tabs glass" aria-label="Choose an outlook day">
+				<button class:active={selectedDay === 'today'} on:click={() => selectedDay = 'today'}><span>Today</span><small>{today}</small></button>
+				<button class:active={selectedDay === 'tomorrow'} on:click={() => selectedDay = 'tomorrow'}><span>Tomorrow</span><small>{nextOutlookDate}</small></button>
+				<button class:active={selectedDay === 'day-after'} on:click={() => selectedDay = 'day-after'}><span>Day after tomorrow</span><small>{dayAfterDate}</small></button>
+			</section>
+		{/if}
 		{#if fetchingPrediction && activeTab === 'overview'}
 			<section class="prediction-loading" role="status" aria-live="polite" aria-busy="true">
 				<div class="loading-mark" aria-hidden="true"><Activity size={30}/></div>
 				<p class="eyebrow">Latest central update</p>
 				<h1>Fetching predictions for {selected.name}</h1>
 				<p>SahelWatch is retrieving the latest stored outlook and environmental readings for this location.</p>
-				<div class="loading-track" aria-hidden="true"><span></span></div>
+				<strong class="loading-percentage">{loadingProgress}%</strong>
+				<div class="loading-track" role="progressbar" aria-label="Prediction retrieval progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={loadingProgress}><span style={`width:${loadingProgress}%`}></span></div>
+			</section>
+		{:else if selectedDay === 'day-after' && activeTab === 'overview'}
+			<section class="readiness-state glass" role="status">
+				<p class="eyebrow">Extended outlook · {dayAfterDate}</p>
+				<h1>Prediction readiness</h1>
+				<strong>0%</strong>
+				<div class="readiness-track"><span style="width:0%"></span></div>
+				<p>SahelWatch is still checking this longer-range outlook. Available readings alone do not yet support a dependable result, so no risk percentage is shown.</p>
+			</section>
+		{:else if selectedDay === 'tomorrow' && !nextOutlook && activeTab === 'overview'}
+			<section class="readiness-state glass" role="status">
+				<p class="eyebrow">Tomorrow · {nextOutlookDate}</p>
+				<h1>Collecting tomorrow’s central outlook</h1>
+				<strong>0%</strong>
+				<div class="readiness-track"><span style="width:0%"></span></div>
+				<p>The worker has not stored a complete prediction and evidence record for tomorrow yet. This screen will update automatically.</p>
 			</section>
 		{:else if predictionLoadState === 'pending' && activeTab === 'overview'}
-			<section class="forecast-strip glass" aria-label="Daily central outlooks">
-				<div><p class="eyebrow">Central outlooks</p><strong>Present and future days</strong><small>These results are prepared centrally and shared with every user.</small></div>
-				<div class="day"><span>Today</span><strong>Preparing</strong><small>Central update pending</small></div>
-				<div class="day"><span>Tomorrow</span><strong>{nextOutlook ? `${Math.round(nextOutlook.probability * 100)}%` : 'Preparing'}</strong><small>{nextOutlook?.riskLevel || 'Central update pending'}</small></div>
-				<div class="day"><span>Day after tomorrow</span><strong>N/A</strong><small>Coming after model validation</small></div>
-			</section>
 			<section class="prediction-state" role="status" aria-live="polite">
 				<div class="loading-mark"><Clock3 size={30}/></div>
 				<p class="eyebrow">Today’s central update</p>
@@ -340,29 +409,23 @@
 				<p>SahelWatch could not reach the central records for {selected.name}. It will try again automatically.</p>
 			</section>
 		{:else if activeTab === 'overview'}
-			<section class="forecast-strip glass" aria-label="Daily central outlooks">
-				<div><p class="eyebrow">Central outlooks</p><strong>Present and future days</strong><small>These results are prepared centrally and shared with every user.</small></div>
-				<div class="day"><span>Today</span><strong>{currentOutlook ? `${Math.round(currentOutlook.probability * 100)}%` : `${probability}%`}</strong><small>{currentOutlook?.riskLevel || prediction.riskLevel}</small></div>
-				<div class="day"><span>Tomorrow</span><strong>{nextOutlook ? `${Math.round(nextOutlook.probability * 100)}%` : 'Preparing'}</strong><small>{nextOutlook?.riskLevel || 'Central update pending'}</small></div>
-				<div class="day"><span>Day after tomorrow</span><strong>N/A</strong><small>Coming after model validation</small></div>
-			</section>
 			<section class="hero" aria-labelledby="forecast-heading">
 				<div class="hero-copy">
 					<div class="place"><i class:demo={!online}></i>{online ? 'Latest dust outlook' : 'Dust outlook unavailable'} · {selected.name}, {selected.country}</div>
-					<p class="eyebrow">{prediction.predictionDate === today ? 'Today’s dust outlook' : `Dust outlook for ${prediction.predictionDate}`}</p>
-					<h1 id="forecast-heading">{riskCopy}<span class="risk-word {riskTone}">{prediction.available === false ? 'Try again shortly' : `${probability}% risk`}</span></h1>
+					<p class="eyebrow">{selectedDay === 'today' ? 'Today’s dust outlook' : `Dust outlook for ${selectedTargetDate}`}</p>
+					<h1 id="forecast-heading">{riskCopy}<span class="risk-word {riskTone}">{activePrediction.available === false ? 'Try again shortly' : `${probability}% risk`}</span></h1>
 					<p class="summary">SahelWatch checks wind, heat, ground dryness and dust in the air to give communities early notice of possible dusty conditions.</p>
 					<div class="hero-actions">
 						<button class="primary" on:click={() => activeTab = 'tracking'}>Track this forecast <ArrowRight size={18}/></button>
 						<button class="secondary" on:click={() => activeTab = 'history'}><CalendarDays size={18}/> Search past conditions</button>
 					</div>
 				</div>
-				<div class="risk-orb {riskTone}" style={`--value:${prediction.available === false ? 0 : prediction.probability}`} aria-label={prediction.available === false ? 'Prediction unavailable' : `${probability} percent dust-storm probability`}>
+				<div class="risk-orb {riskTone}" style={`--value:${activePrediction.available === false ? 0 : activePrediction.probability}`} aria-label={activePrediction.available === false ? 'Prediction unavailable' : `${probability} percent dust-storm probability`}>
 					<div>
-						{#if prediction.available === false}
+						{#if activePrediction.available === false}
 							<span class="unavailable-value">!</span><p>Not available</p>
 						{:else}
-							<span>{probability}</span><small>%</small><p>{prediction.riskLevel}</p>
+							<span>{probability}</span><small>%</small><p>{activePrediction.riskLevel}</p>
 						{/if}
 					</div>
 				</div>
@@ -377,21 +440,24 @@
 
 			{#if confirmedMissingReadings.length > 0}<div class="data-warning" role="status"><Info size={18}/><p><strong>Confirmed missing reading:</strong> {confirmedMissingMessage} SahelWatch used the available readings and will check again during the next central update.</p></div>{/if}
 			<section class="explanation glass">
-				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% chance of dusty conditions` : online ? `Latest dust outlook for ${selected.name}` : 'Dust information is temporarily unavailable'}</h2><p>{progressive?.message || (online ? 'This outlook updates automatically when newer environmental information becomes available.' : 'Please check your connection and try again shortly.')}</p><small>{prediction.evidenceSummary ? `${Math.round(prediction.evidenceSummary.inputCompleteness * 100)}% of expected inputs were available. Each value is marked as a forecast, analysis or reading by the service.` : 'Weather details are shown only when verified source information is available.'}</small></div>
+				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>Dust outlook for {selected.name} on {selectedTargetDate}</h2><p>This outlook updates automatically when newer environmental information becomes available.</p><small>{activePrediction.evidenceSummary ? `${Math.round(activePrediction.evidenceSummary.inputCompleteness * 100)}% of expected inputs were available. Of the available values, ${recordedEvidencePercent}% came from recorded or analysed conditions and ${forecastEvidencePercent}% came from forecasts.` : 'Weather details are shown only when verified source information is available.'}</small></div>
 			</section>
 
 		{:else if activeTab === 'tracking'}
 			<section class="subpage-head"><div><p class="eyebrow">Tracking</p><h1>Monitor {selected.name}</h1><p>Inspect the current risk and predicted 24–48 hour window.</p></div><select bind:value={selected} on:change={() => loadLocation(selected)} aria-label="Tracking location">{#each locations as location}<option value={location}>{location.name}, {location.country}</option>{/each}</select></section>
-			<div class="horizon-coming-soon" aria-disabled="true">
-				<div class="horizon-picker glass" aria-label="Daily prediction horizons, coming soon">
-					{#each dailyHorizonNames as day}<button disabled={multiHorizonComingSoon || !dailyHorizons} title="Future daily outlooks are coming soon" class:active={!multiHorizonComingSoon && Boolean(dailyHorizons) && selectedHorizon === day} on:click={() => selectedHorizon = day}>{day}</button>{/each}
-				</div>
-				<span>Coming soon</span>
-			</div>
-			<section class="tracking-grid">
-				<div class="tracking-map glass">{#if PredictionMapComponent}<svelte:component this={PredictionMapComponent} location={selected} {prediction} conditions={prediction.conditions}/>{/if}</div>
-				<aside class="detail glass"><div class="detail-top"><span class="badge {horizon?.riskLevel || riskTone}">{horizon?.riskLevel || prediction.riskLevel}</span><small>{horizon?.targetDate || prediction.predictionDate}</small></div><h2>{horizon ? Math.round(horizon.probability * 100) : probability}% chance</h2><p>{horizon ? `Dust outlook for ${horizon.targetDate}.` : riskCopy}</p><dl><div><dt><Clock3 size={17}/>Outlook period</dt><dd>{horizon?.approximateLeadTime || 'Next 24–48 hours'}</dd></div><div><dt><Activity size={17}/>Wind speed</dt><dd>{conditions?.windSpeedKmh != null ? `${conditions.windSpeedKmh} km/h` : 'Not available'}</dd></div><div><dt><ShieldCheck size={17}/>Ground condition</dt><dd>{conditions?.soilMoisture != null ? `${(conditions.soilMoisture * 100).toFixed(1)}% moisture` : 'Not available'}</dd></div><div><dt><Map size={17}/>Area</dt><dd>{selected.name}, {selected.country}</dd></div></dl><div class="notice"><Info size={18}/><p>The line on the map shows where the wind is moving. It is not a storm boundary or evacuation route. Follow local authorities during dangerous weather.</p></div></aside>
+			<section class="day-tabs glass tracking-days" aria-label="Choose a tracking day">
+				<button class:active={selectedDay === 'today'} on:click={() => selectedDay = 'today'}><span>Today</span><small>{today}</small></button>
+				<button class:active={selectedDay === 'tomorrow'} on:click={() => selectedDay = 'tomorrow'}><span>Tomorrow</span><small>{nextOutlookDate}</small></button>
+				<button class:active={selectedDay === 'day-after'} on:click={() => selectedDay = 'day-after'}><span>Day after tomorrow</span><small>{dayAfterDate}</small></button>
 			</section>
+			{#if selectedDay === 'day-after' || (selectedDay === 'tomorrow' && !nextOutlook)}
+				<section class="readiness-state glass" role="status"><p class="eyebrow">{selectedTargetDate}</p><h1>Tracking is not ready for this day</h1><strong>0%</strong><div class="readiness-track"><span style="width:0%"></span></div><p>SahelWatch displays tracking only after a complete central prediction and its supporting evidence have been stored.</p></section>
+			{:else}
+				<section class="tracking-grid">
+					<div class="tracking-map glass">{#if PredictionMapComponent}<svelte:component this={PredictionMapComponent} location={selected} prediction={activePrediction} {conditions}/>{/if}</div>
+					<aside class="detail glass"><div class="detail-top"><span class="badge {riskTone}">{activePrediction.riskLevel}</span><small>{selectedTargetDate}</small></div><h2>{probability}% chance</h2><p>{riskCopy}</p><dl><div><dt><Clock3 size={17}/>Evidence mixture</dt><dd>{activePrediction.evidenceSummary ? `${recordedEvidencePercent}% recorded or analysed · ${forecastEvidencePercent}% forecast` : 'Not available'}</dd></div><div><dt><Activity size={17}/>Wind speed</dt><dd>{conditions?.windSpeedKmh != null ? `${conditions.windSpeedKmh} km/h` : 'Not available'}</dd></div><div><dt><ShieldCheck size={17}/>Ground condition</dt><dd>{conditions?.soilMoisture != null ? `${(conditions.soilMoisture * 100).toFixed(1)}% moisture` : 'Not available'}</dd></div><div><dt><Map size={17}/>Area</dt><dd>{selected.name}, {selected.country}</dd></div></dl><div class="notice"><Info size={18}/><p>This tracking view combines the stored readings, analyses and forecasts shown above. It is not an evacuation route. Follow local authorities during dangerous weather.</p></div></aside>
+				</section>
+			{/if}
 
 		{:else if activeTab === 'history'}
 			<section class="history-page">
@@ -447,10 +513,18 @@
 	.prediction-loading .loading-mark { width: 66px; height: 66px; margin-bottom: 24px; display: grid; place-items: center; border-radius: 22px; color: var(--blue); background: color-mix(in srgb, var(--blue) 11%, var(--surface)); animation: loading-pulse 1.4s ease-in-out infinite; }
 	.prediction-loading h1 { max-width: 760px; margin: 0; font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: 1; letter-spacing: -.055em; }
 	.prediction-loading > p:not(.eyebrow) { max-width: 620px; margin: 18px 0 28px; color: var(--text-secondary); font-size: 1rem; line-height: 1.65; }
+	.loading-percentage { margin-bottom: 12px; color: var(--blue); font-size: 1.6rem; font-variant-numeric: tabular-nums; }
 	.loading-track { width: min(440px, 78vw); height: 7px; overflow: hidden; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--blue) 10%, var(--surface-muted)); }
-	.loading-track span { width: 42%; height: 100%; display: block; border-radius: inherit; background: var(--blue); animation: loading-travel 1.15s ease-in-out infinite; }
+	.loading-track span { height: 100%; display: block; border-radius: inherit; background: var(--blue); transition: width .3s ease-out; }
 	@keyframes loading-pulse { 50% { transform: scale(1.06); opacity: .72; } }
-	@keyframes loading-travel { from { transform: translateX(-110%); } to { transform: translateX(350%); } }
+	.day-tabs { margin: 34px 0 0; padding: 7px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; border-radius: var(--radius-lg); }
+	.day-tabs button { min-height: 70px; padding: 10px 14px; display: grid; align-content: center; justify-items: start; border: 1px solid transparent; border-radius: 17px; color: var(--text-secondary); background: transparent; cursor: pointer; }
+	.day-tabs button.active { border-color: color-mix(in srgb,var(--blue) 35%,var(--border)); color: var(--text); background: color-mix(in srgb,var(--blue) 9%,var(--surface)); box-shadow: var(--shadow-sm); }
+	.day-tabs span,.day-tabs small { display:block; }.day-tabs span { font-weight:750; }.day-tabs small { margin-top:4px; color:var(--text-tertiary); font-size:.72rem; }
+	.tracking-days { margin: 0 0 16px; }
+	.readiness-state { min-height: 440px; margin-top: 18px; padding: 48px 24px; display: grid; place-content: center; justify-items: center; border-radius: var(--radius-xl); text-align:center; }
+	.readiness-state h1 { margin: 0; font-size: clamp(2rem,5vw,4rem); letter-spacing:-.05em; }.readiness-state > strong { margin:20px 0 10px; color:var(--blue); font-size:2.3rem; font-variant-numeric:tabular-nums; }.readiness-state > p:not(.eyebrow) { max-width:680px; margin:20px 0 0; color:var(--text-secondary); line-height:1.65; }
+	.readiness-track { width:min(460px,78vw); height:8px; overflow:hidden; border-radius:var(--radius-pill); background:var(--surface-muted); }.readiness-track span { height:100%; display:block; background:var(--blue); }
 	.hero { min-height: 470px; padding: clamp(58px, 8vw, 120px) clamp(8px, 7vw, 100px) 58px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); align-items: center; gap: 54px; }
 	.place { width: max-content; margin-bottom: 28px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-secondary); background: var(--surface); font-size: .76rem; font-weight: 600; }
 	.place i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }.place i.demo { background: var(--orange); }
@@ -474,8 +548,6 @@
 	.forecast-strip { margin-bottom: 70px; padding: 18px 22px; display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); align-items: center; gap: 12px; border-radius: var(--radius-lg); }.forecast-strip strong,.forecast-strip small { display: block; }.forecast-strip small { margin-top: 5px; color: var(--text-secondary); font-size: .75rem; }.day { padding: 10px 18px; border-left: 1px solid var(--border); }.day span { color: var(--text-secondary); font-size: .78rem; }.day strong { margin-top: 7px; font-size: 1.55rem; font-variant-numeric: tabular-nums; }
 	.subpage-head { padding: 65px 8px 28px; display: flex; align-items: end; justify-content: space-between; gap: 20px; }.subpage-head p { margin: 10px 0 0; color: var(--text-secondary); }.subpage-head select,.history-form select,.history-form input { min-height: 48px; padding: 0 15px; border: 1px solid var(--border); border-radius: 15px; color: var(--text); background: var(--surface-solid); }
 	.tracking-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .65fr); gap: 14px; }.tracking-map { height: 680px; overflow: hidden; border-radius: var(--radius-xl); }.detail { padding: 26px; border-radius: var(--radius-xl); }.detail-top { display: flex; justify-content: space-between; align-items: center; }.detail-top small { color: var(--text-secondary); }.badge { padding: 7px 10px; border-radius: var(--radius-pill); font-size: .72rem; font-weight: 750; text-transform: uppercase; }.badge.clear { color: var(--green); background: color-mix(in srgb,var(--green) 12%,transparent); }.badge.watch { color: var(--yellow); background: color-mix(in srgb,var(--yellow) 12%,transparent); }.badge.warning { color: var(--orange); background: color-mix(in srgb,var(--orange) 12%,transparent); }.badge.alert { color: var(--red); background: color-mix(in srgb,var(--red) 12%,transparent); }.detail h2 { margin: 34px 0 8px; font-size: 3.3rem; letter-spacing: -.055em; }.detail > p { color: var(--text-secondary); line-height: 1.55; }.detail dl { margin: 30px 0; }.detail dl div { padding: 15px 0; display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); }.detail dt { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }.detail dd { margin: 0; text-align: right; font-weight: 600; }.notice,.coverage-note { padding: 14px; display: flex; align-items: flex-start; gap: 10px; border-radius: 16px; color: var(--text-secondary); background: var(--surface-muted); }.notice p,.coverage-note p { margin: 0; font-size: .78rem; line-height: 1.5; }
-	.horizon-picker { width: max-content; margin: 0 0 14px auto; padding: 5px; display: flex; gap: 4px; border-radius: var(--radius-pill); }.horizon-picker button { min-width: 58px; min-height: 42px; border: 0; border-radius: var(--radius-pill); color: var(--text-secondary); background: transparent; cursor: pointer; }.horizon-picker button.active { color: white; background: var(--blue); box-shadow: 0 8px 20px rgba(0,122,255,.2); }.horizon-picker button:disabled { opacity: .38; cursor: not-allowed; }
-	.horizon-coming-soon { margin: 0 0 14px auto; display: flex; align-items: center; justify-content: flex-end; gap: 10px; opacity: .72; filter: grayscale(.7); }.horizon-coming-soon .horizon-picker { margin: 0; }.horizon-coming-soon > span { padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-secondary); background: var(--surface-muted); font-size: .7rem; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
 	.history-page { width: min(980px, 100%); margin: auto; }.history-form { padding: 18px; display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; border-radius: var(--radius-lg); }.history-form label span { margin: 0 0 8px 3px; display: block; color: var(--text-secondary); font-size: .76rem; font-weight: 600; }.history-form select,.history-form input { width: 100%; }.coverage-note { margin: 14px 0 30px; }.history-message { color: var(--text-secondary); text-align: center; }.history-result { margin: 12px 0; padding: 22px; display: flex; align-items: center; justify-content: space-between; border-radius: var(--radius-lg); }.history-result h2 { margin-bottom: 5px; }.history-result p { margin-bottom: 0; color: var(--text-secondary); }.historical-risk { text-align: right; }.historical-risk strong,.historical-risk span { display: block; }.historical-risk strong { font-size: 2.5rem; }.historical-risk span { color: var(--text-secondary); text-transform: capitalize; }
 	.utility-page { width: min(980px,100%); margin: auto; }.offline-callout { margin-bottom: 18px; padding: 18px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; border-radius: var(--radius-md); }.offline-callout > svg { color: var(--orange); }.offline-callout p { margin: 4px 0 0; color: var(--text-secondary); font-size: .82rem; }.offline-callout button { min-height: 44px; padding: 0 15px; border: 0; border-radius: var(--radius-pill); color: white; background: var(--blue); cursor: pointer; }.notification-list { display: grid; gap: 10px; }.notification { padding: 18px; display: flex; align-items: center; gap: 14px; border-radius: var(--radius-md); }.notification-mark { min-width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; }.notification-mark.clear { color: var(--green); background: color-mix(in srgb,var(--green) 12%,transparent); }.notification-mark.watch { color: var(--yellow); background: color-mix(in srgb,var(--yellow) 12%,transparent); }.notification-mark.warning { color: var(--orange); background: color-mix(in srgb,var(--orange) 12%,transparent); }.notification-mark.alert { color: var(--red); background: color-mix(in srgb,var(--red) 12%,transparent); }.notification p,.notification small { margin: 4px 0 0; color: var(--text-secondary); font-size: .78rem; }.empty { padding: 60px 20px; border-radius: var(--radius-lg); color: var(--text-secondary); text-align: center; }.empty h2 { margin: 12px 0 6px; color: var(--text); }.settings-card,.legal { padding: 24px; border-radius: var(--radius-lg); }.settings-title { display: flex; gap: 14px; }.settings-title > span { min-width: 44px; height: 44px; display: grid; place-items: center; border-radius: 15px; color: var(--blue); background: color-mix(in srgb,var(--blue) 11%,transparent); }.settings-title h2 { margin: 0; }.settings-title p { margin: 6px 0 0; color: var(--text-secondary); }.settings-card form { margin-top: 24px; }.settings-card label { display: block; margin: 0 0 8px; color: var(--text-secondary); font-size: .78rem; font-weight: 600; }.phone-field { min-height: 50px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-solid); overflow: hidden; }.phone-field > span { padding-left: 14px; color: var(--text-secondary); }.phone-field input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text); background: transparent; }.phone-field button { align-self: stretch; padding: 0 16px; display: flex; align-items: center; gap: 7px; border: 0; color: white; background: var(--blue); cursor: pointer; }.form-message { margin: 12px 0 0; color: var(--text-secondary); font-size: .8rem; }.linked { margin-top: 22px; padding: 14px; display: flex; align-items: center; gap: 10px; border-radius: 16px; background: var(--surface-muted); }.linked svg { color: var(--green); }.linked .danger { margin-left: auto; }.danger { border: 0; color: var(--red); background: transparent; cursor: pointer; }.legal { margin-top: 12px; display: grid; }.legal a,.danger-row { min-height: 54px; padding: 0 4px; display: flex; align-items: center; justify-content: space-between; border: 0; border-bottom: 1px solid var(--border); background: transparent; cursor: pointer; }.danger-row { justify-content: flex-start; gap: 9px; color: var(--red); border-bottom: 0; }
 	.account-link,.account-switch{margin-top:20px}.account-switch{width:100%}
@@ -487,7 +559,7 @@
 		.tabs { position: fixed; z-index: 30; top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; margin: 0; padding-bottom: max(5px, env(safe-area-inset-bottom)); }
 		.tabs button { min-width: 0; flex: 1; flex-direction: column; gap: 2px; padding: 5px 2px; font-size: .63rem; }
 		.explanation { margin-top: -34px; grid-template-columns: 1fr; }
-		.horizon-picker { width: 100%; overflow-x: auto; }.horizon-picker button { flex: 1; }
+		.day-tabs { grid-template-columns: 1fr; }.day-tabs button { min-height:58px; }
 		.offline-callout { grid-template-columns: auto 1fr; }.offline-callout button { grid-column: 1 / -1; }
 		.phone-field { align-items: stretch; flex-wrap: wrap; }.phone-field input { min-height: 48px; }.phone-field button { width: 100%; min-height: 48px; justify-content: center; }
 	}
@@ -496,7 +568,6 @@
 	.form-message.error{border-color:color-mix(in srgb,var(--red) 35%,var(--border));background:color-mix(in srgb,var(--red) 10%,var(--surface))}.form-message.error svg{color:var(--red)}
 	.metrics small span{display:block;margin-top:4px;color:var(--text-tertiary)}
 	@media (prefers-reduced-motion: reduce) {
-		.loading-mark, .loading-track span { animation: none; }
-		.loading-track span { width: 100%; opacity: .55; }
+		.loading-mark { animation: none; }
 	}
 </style>

@@ -366,3 +366,38 @@ def query_snapshot_evidence(snapshot_id: str) -> list[dict[str, Any]]:
                 item[key] = item[key].isoformat()
         result.append(item)
     return result
+
+
+def query_snapshots_evidence(snapshot_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """Return evidence for several daily outlooks over one database connection."""
+    if not snapshot_ids or not _using_postgres():
+        return {snapshot_id: [] for snapshot_id in snapshot_ids}
+    with _postgres_connection() as connection:
+        rows = connection.execute(
+            """SELECT link.snapshot_id,e.variable_name,e.value,e.unit,e.provider,
+                      e.evidence_kind,e.measured_at,e.available_at,
+                      e.availability_is_estimated,e.retrieved_at,
+                      e.forecast_issued_at,e.forecast_target_at,e.quality_status,
+                      e.is_fallback,e.source_age_seconds,link.feature_position
+               FROM prediction_evidence_links link
+               JOIN environmental_evidence e ON e.id=link.evidence_id
+               WHERE link.snapshot_id = ANY(%s::uuid[])
+               ORDER BY link.snapshot_id,link.feature_position,e.variable_name""",
+            ([uuid.UUID(snapshot_id) for snapshot_id in snapshot_ids],),
+        ).fetchall()
+    grouped = {snapshot_id: [] for snapshot_id in snapshot_ids}
+    for row in rows:
+        item = dict(row)
+        snapshot_id = str(item.pop("snapshot_id"))
+        item.pop("feature_position", None)
+        for key in (
+            "measured_at",
+            "available_at",
+            "retrieved_at",
+            "forecast_issued_at",
+            "forecast_target_at",
+        ):
+            if item.get(key):
+                item[key] = item[key].isoformat()
+        grouped.setdefault(snapshot_id, []).append(item)
+    return grouped

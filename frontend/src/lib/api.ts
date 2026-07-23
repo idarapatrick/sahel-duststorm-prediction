@@ -46,7 +46,7 @@ function forecastCoordinates(location: Location) {
 }
 
 export async function getCoveredLocations(): Promise<Location[]> {
-	const data = await getJson('/api/v1/coverage/places?limit=500', 5_000);
+	const data = await getJson('/api/v1/coverage/places?limit=500', 30_000);
 	return Array.isArray(data.places) ? data.places.map(coveredPlace) : [];
 }
 
@@ -166,7 +166,40 @@ export async function getLatestPrediction(location: Location): Promise<Predictio
 			probability: Number(item.probability),
 			riskLevel: item.alert_level,
 			recordedAt: item.recorded_at,
-			inputCompleteness: item.input_completeness == null ? undefined : Number(item.input_completeness)
+			inputCompleteness: item.input_completeness == null ? undefined : Number(item.input_completeness),
+			observedFraction: item.observed_fraction == null ? undefined : Number(item.observed_fraction),
+			forecastFraction: item.forecast_fraction == null ? undefined : Number(item.forecast_fraction),
+			conditions: item.current_conditions ? {
+				observedAt: item.current_conditions.observed_at,
+				windSpeedMs: item.current_conditions.wind_speed_ms,
+				windSpeedKmh: item.current_conditions.wind_speed_kmh,
+				windDirectionDeg: item.current_conditions.wind_direction_deg,
+				temperatureC: item.current_conditions.temperature_c,
+				surfacePressureHpa: item.current_conditions.surface_pressure_hpa,
+				precipitationMm: item.current_conditions.precipitation_mm,
+				dewpointC: item.current_conditions.dewpoint_c,
+				soilMoisture: item.current_conditions.soil_moisture,
+				vegetationWaterContent: item.current_conditions.vegetation_water_content,
+				aod: item.current_conditions.aod
+			} : undefined,
+			surfaceData: item.surface_data ? {
+				soilMoisture: item.surface_data.soil_moisture,
+				vegetationWaterContent: item.surface_data.vegetation_water_content,
+				aod: item.surface_data.prev_day_aod
+			} : undefined,
+			environmentalEvidence: Array.isArray(item.environmental_evidence)
+				? item.environmental_evidence.map((evidence: any) => ({
+					variableName: evidence.variable_name,
+					value: evidence.value == null ? null : Number(evidence.value),
+					unit: evidence.unit,
+					provider: evidence.provider,
+					kind: evidence.evidence_kind,
+					measuredAt: evidence.measured_at,
+					availableAt: evidence.available_at,
+					qualityStatus: evidence.quality_status,
+					isFallback: Boolean(evidence.is_fallback)
+				}))
+				: []
 		})) : [] };
 }
 

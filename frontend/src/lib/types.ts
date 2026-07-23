@@ -25,6 +25,11 @@ export interface Prediction {
 export interface CentralOutlook {
 	targetDate: string; probability: number; riskLevel: RiskLevel; recordedAt: string;
 	inputCompleteness?: number;
+	observedFraction?: number;
+	forecastFraction?: number;
+	conditions?: Conditions;
+	environmentalEvidence?: EnvironmentalEvidence[];
+	surfaceData?: { soilMoisture: number | null; vegetationWaterContent: number | null; aod: number | null };
 }
 export interface EnvironmentalEvidence {
 	variableName: string; value: number | null; unit?: string; provider: string;

@@ -16,7 +16,7 @@ load_dotenv()
 from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_for_date, get_location_name
 from alert_tracker import get_all_tracked, clear_expired
 from history_store import RETENTION_DAYS, database_status, query_latest_outlooks, query_latest_prediction_bundle, query_recent_snapshots, query_snapshots, save_snapshot
-from evidence_store import query_snapshot_evidence
+from evidence_store import query_snapshot_evidence, query_snapshots_evidence
 from monitoring_store import prediction_schedule
 from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
@@ -109,6 +109,46 @@ def probability_to_alert(probability: float) -> str:
     if probability >= 0.3:
         return "watch"
     return "clear"
+
+
+def _conditions_from_evidence(records: list[dict]) -> dict:
+    """Build dashboard figures from one prediction snapshot's linked evidence."""
+    values = {item["variable_name"]: item.get("value") for item in records}
+    wind_ms = values.get("wind_speed_10m")
+    return {
+        "observed_at": next(
+            (item.get("measured_at") or item.get("forecast_target_at")
+             for item in records if item["variable_name"] == "wind_speed_10m"),
+            None,
+        ),
+        "wind_speed_ms": wind_ms,
+        "wind_speed_kmh": round(wind_ms * 3.6, 1) if wind_ms is not None else None,
+        "wind_direction_deg": values.get("wind_direction_10m"),
+        "temperature_c": values.get("temperature_2m"),
+        "surface_pressure_hpa": values.get("surface_pressure"),
+        "precipitation_mm": values.get("precipitation"),
+        "dewpoint_c": values.get("dewpoint_2m"),
+        "soil_moisture": values.get("soil_moisture"),
+        "vegetation_water_content": values.get("vegetation_water_content"),
+        "aod": values.get("previous_day_aod"),
+    }
+
+
+def _daily_outlook_bundle(snapshot: dict, records: list[dict] | None = None) -> dict:
+    """Attach only the evidence used by this exact calendar-day prediction."""
+    records = records if records is not None else query_snapshot_evidence(snapshot["id"])
+    conditions = _conditions_from_evidence(records)
+    surface = snapshot.get("metadata", {}).get("surface_data") or {
+        "soil_moisture": conditions["soil_moisture"],
+        "vegetation_water_content": conditions["vegetation_water_content"],
+        "prev_day_aod": conditions["aod"],
+    }
+    return {
+        **snapshot,
+        "surface_data": surface,
+        "current_conditions": conditions,
+        "environmental_evidence": records,
+    }
 
 
 def validate_sahel_point(lat: float, lon: float) -> None:
@@ -381,7 +421,7 @@ async def latest_prediction(lat: float, lon: float):
     validate_sahel_point(lat, lon)
     central_target = datetime.now(timezone.utc).date()
     supported_targets = central_target_dates(central_target)
-    snapshot, evidence = query_latest_prediction_bundle(
+    snapshot, _ = query_latest_prediction_bundle(
         lat, lon, central_target, allow_recent_fallback=False
     )
     if not snapshot:
@@ -395,35 +435,38 @@ async def latest_prediction(lat: float, lon: float):
                 "next_update_at": schedule["next_update_at"],
             },
         )
-    outlooks = query_latest_outlooks(lat, lon, supported_targets)
+    snapshots = query_latest_outlooks(lat, lon, supported_targets)
+    evidence_by_snapshot = query_snapshots_evidence(
+        [str(item["id"]) for item in snapshots]
+    )
+    outlooks = [
+        _daily_outlook_bundle(
+            item, evidence_by_snapshot.get(str(item["id"]), [])
+        )
+        for item in snapshots
+    ]
     recorded_at = datetime.fromisoformat(snapshot["recorded_at"].replace("Z", "+00:00"))
     age_minutes = max(
         0, round((datetime.now(timezone.utc) - recorded_at).total_seconds() / 60, 1)
     )
-    surface = snapshot.get("metadata", {}).get("surface_data")
-    if not surface and evidence:
-        surface = {
-            "soil_moisture": evidence.get("soil_moisture"),
-            "vegetation_water_content": evidence.get("vegetation_water_content"),
-            "prev_day_aod": evidence.get("aod"),
+    today_bundle = next(
+        (
+            item
+            for item in outlooks
+            if item["target_date"] == central_target.isoformat()
+        ),
+        None,
+    )
+    if today_bundle is None:
+        today_bundle = _daily_outlook_bundle(snapshot)
+    surface = today_bundle["surface_data"]
+    conditions = today_bundle["current_conditions"]
+    field_evidence = today_bundle["environmental_evidence"]
+    evidence_payload = {
+        "raw_payload": {
+            "input_quality": snapshot.get("metadata", {}).get("input_quality", {})
         }
-    conditions = None
-    if evidence:
-        wind_ms = evidence.get("wind_speed_ms")
-        conditions = {
-            "observed_at": evidence.get("observed_at"),
-            "wind_speed_ms": wind_ms,
-            "wind_speed_kmh": round(wind_ms * 3.6, 1) if wind_ms is not None else None,
-            "wind_direction_deg": evidence.get("wind_direction_deg"),
-            "temperature_c": evidence.get("temperature_c"),
-            "dewpoint_c": evidence.get("dewpoint_c"),
-            "surface_pressure_hpa": evidence.get("surface_pressure_hpa"),
-            "precipitation_mm": evidence.get("precipitation_mm"),
-            "soil_moisture": evidence.get("soil_moisture"),
-            "vegetation_water_content": evidence.get("vegetation_water_content"),
-            "aod": evidence.get("aod"),
-        }
-    field_evidence = query_snapshot_evidence(snapshot["id"])
+    }
     schedule = prediction_schedule(lat, lon, central_target)
     return {
         "prediction": snapshot,
@@ -441,7 +484,7 @@ async def latest_prediction(lat: float, lon: float):
             "updating": schedule["updating"],
             "worker_status": schedule["status"],
         },
-        "evidence": evidence,
+        "evidence": evidence_payload,
         "environmental_evidence": field_evidence,
     }
 

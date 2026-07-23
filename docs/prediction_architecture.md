@@ -81,6 +81,12 @@ fingerprint matches the latest stored revision, the worker reschedules the job
 without inference or a duplicate snapshot. New results are accepted whether
 their probability rises or falls.
 
+The central worker maintains two independently stored targets for every active
+forecast cell: the current calendar day and the next calendar day. The current
+day is the dashboard's primary result. The next day is returned as a separate
+outlook. A following-day result remains disabled because the deployed
+single-head model has not been validated for that additional lead time.
+
 ## Leakage-safe validation
 
 Historical replay follows one rule:

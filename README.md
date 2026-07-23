@@ -34,7 +34,7 @@ SahelWatch is an early-warning aid, not a replacement for an official warning is
 
 - Responsive SvelteKit interface for desktop and mobile browsers
 - Searchable location selection for database-backed cities, towns, and rural communities
-- Immediate retrieval of the latest centrally generated prediction when the application starts or the location changes
+- Immediate retrieval of the current-day central prediction, with the separately stored next-day outlook shown alongside it
 - Progress state that does not display a probability before a result exists
 - Current wind speed, temperature, soil moisture, and AOD when their providers return valid data
 - Plain-language prediction evidence and data-availability warnings
@@ -87,7 +87,7 @@ The progressive pipeline accepts both increases and decreases. If newer environm
 
 The background worker creates monitoring jobs without waiting for users. For each active forecast grid cell it:
 
-1. creates or finds the next target-day job;
+1. creates or finds current-day and next-day jobs;
 2. atomically claims the job from PostgreSQL;
 3. retrieves and fingerprints updated atmospheric and surface evidence;
 4. runs inference only when the evidence has meaningfully changed;
