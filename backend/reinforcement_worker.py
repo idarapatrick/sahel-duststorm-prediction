@@ -17,6 +17,7 @@ from monitoring_store import (
     ensure_monitoring_job,
     fail_job,
     monitoring_job_is_running,
+    normalize_hourly_schedule,
     record_environmental_evidence,
     recover_stale_jobs,
     reschedule_job,
@@ -101,6 +102,12 @@ async def run_forever() -> None:
             if last_seed != today:
                 recover_stale_jobs()
                 seed_central_jobs()
+                normalized = normalize_hourly_schedule()
+                if normalized:
+                    print(
+                        f"Moved {normalized} central jobs to the next hourly run",
+                        flush=True,
+                    )
                 with _postgres_connection() as connection:
                     connection.execute("SELECT purge_sahelwatch_expired_data()")
                 last_seed = today

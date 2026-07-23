@@ -7,6 +7,7 @@ earthengine-api==1.7.36
 numpy==2.5.1
 requests==2.34.2
 psycopg[binary]==3.3.4
+psycopg-pool==3.3.1
 phonenumbers==9.0.34
 firebase-admin==7.5.0
 twilio==9.10.9

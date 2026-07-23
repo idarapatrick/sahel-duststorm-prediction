@@ -11,7 +11,10 @@ from typing import Any
 from history_store import _postgres_connection, _using_postgres
 
 WORKER_ID = os.getenv("WORKER_ID", f"{socket.gethostname()}-{os.getpid()}")
-MONITOR_INTERVAL_HOURS = max(1, int(os.getenv("MONITOR_INTERVAL_HOURS", "1")))
+# SahelWatch's product contract is one central revision per forecast cell per
+# UTC hour. This is deliberately not deployment-configurable: a stale Render
+# value previously reduced the cadence to six hours without changing the UI.
+MONITOR_INTERVAL_HOURS = 1
 MONITOR_RETRY_MINUTES = max(1, int(os.getenv("MONITOR_RETRY_MINUTES", "15")))
 MONITOR_MAX_ATTEMPTS = max(1, int(os.getenv("MONITOR_MAX_ATTEMPTS", "8")))
 
@@ -88,6 +91,23 @@ def recover_stale_jobs(lock_timeout_minutes: int = 30) -> int:
                       last_error='Worker lock expired', updated_at=now()
                WHERE status='running' AND locked_at < %s""",
             (cutoff,),
+        )
+        return result.rowcount
+
+
+def normalize_hourly_schedule() -> int:
+    """Pull legacy six-hour jobs forward to the next UTC hour."""
+    if not _using_postgres():
+        return 0
+    next_hour = datetime.now(timezone.utc).replace(
+        minute=0, second=0, microsecond=0
+    ) + timedelta(hours=1)
+    with _postgres_connection() as connection:
+        result = connection.execute(
+            """UPDATE monitoring_jobs
+               SET next_run_at=%s, updated_at=now()
+               WHERE status IN ('pending','failed') AND next_run_at>%s""",
+            (next_hour, next_hour),
         )
         return result.rowcount
 

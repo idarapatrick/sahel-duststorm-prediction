@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -21,6 +22,9 @@ RETENTION_DAYS = int(os.getenv("HISTORY_RETENTION_DAYS", "90"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DATABASE_REQUIRED = os.getenv("DATABASE_REQUIRED", "false").lower() == "true"
 SQLITE_PATH = Path(os.getenv("HISTORY_DB_PATH", Path(__file__).with_name("sahelwatch_history.db")))
+DB_POOL_SIZE = max(2, int(os.getenv("DB_POOL_SIZE", "6")))
+_POSTGRES_POOL = None
+_POSTGRES_POOL_LOCK = threading.Lock()
 
 
 def _using_postgres() -> bool:
@@ -32,11 +36,25 @@ def _using_postgres() -> bool:
 @contextmanager
 def _postgres_connection() -> Iterator[Any]:
     try:
-        import psycopg
         from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
     except ImportError as exc:
-        raise RuntimeError("Install psycopg[binary] to use DATABASE_URL") from exc
-    with psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=10) as connection:
+        raise RuntimeError("Install psycopg[binary] and psycopg-pool to use DATABASE_URL") from exc
+    global _POSTGRES_POOL
+    if _POSTGRES_POOL is None:
+        with _POSTGRES_POOL_LOCK:
+            if _POSTGRES_POOL is None:
+                pool = ConnectionPool(
+                    conninfo=DATABASE_URL,
+                    min_size=0,
+                    max_size=DB_POOL_SIZE,
+                    kwargs={"row_factory": dict_row, "connect_timeout": 10},
+                    open=False,
+                    name="sahelwatch-postgres",
+                )
+                pool.open(wait=True, timeout=15)
+                _POSTGRES_POOL = pool
+    with _POSTGRES_POOL.connection(timeout=10) as connection:
         yield connection
 
 
@@ -146,7 +164,6 @@ def _normalise_row(row: Any) -> dict[str, Any]:
 
 
 def query_snapshots(lat: float, lon: float, target_date: date) -> list[dict[str, Any]]:
-    purge_expired()
     sql = """SELECT * FROM prediction_snapshots WHERE target_date = %s
              AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s ORDER BY recorded_at DESC"""
     params = (target_date, lat - 0.05, lat + 0.05, lon - 0.05, lon + 0.05)
@@ -159,7 +176,6 @@ def query_snapshots(lat: float, lon: float, target_date: date) -> list[dict[str,
 
 
 def query_recent_snapshots(lat: float, lon: float, limit: int = 10) -> list[dict[str, Any]]:
-    purge_expired()
     sql = """SELECT * FROM prediction_snapshots WHERE lat BETWEEN %s AND %s
              AND lon BETWEEN %s AND %s ORDER BY recorded_at DESC LIMIT %s"""
     params = (lat - 0.05, lat + 0.05, lon - 0.05, lon + 0.05, limit)
@@ -193,6 +209,54 @@ def query_latest_environmental_evidence(lat: float, lon: float) -> dict[str, Any
     if isinstance(item.get("raw_payload"), str):
         item["raw_payload"] = json.loads(item["raw_payload"])
     return item
+
+
+def query_latest_prediction_bundle(
+    lat: float, lon: float, target_date: date
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Read the central snapshot and its evidence over one database connection.
+
+    Retention is enforced by the daily worker job. A dashboard read must remain
+    read-only and must not open extra TLS connections merely to run cleanup.
+    """
+    if not _using_postgres():
+        snapshots = query_snapshots(lat, lon, target_date)
+        if not snapshots:
+            snapshots = query_recent_snapshots(lat, lon, 1)
+        return (snapshots[0] if snapshots else None), None
+
+    snapshot_sql = """SELECT * FROM prediction_snapshots
+                      WHERE target_date=%s
+                        AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+                      ORDER BY recorded_at DESC LIMIT 1"""
+    recent_sql = """SELECT * FROM prediction_snapshots
+                    WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+                    ORDER BY recorded_at DESC LIMIT 1"""
+    evidence_sql = """SELECT e.observed_at,e.received_at,e.wind_speed_ms,
+                             e.wind_direction_deg,e.temperature_c,e.dewpoint_c,
+                             e.surface_pressure_hpa,e.precipitation_mm,e.soil_moisture,
+                             e.vegetation_water_content,e.aod,e.raw_payload
+                      FROM environmental_observations e
+                      JOIN locations l ON l.id=e.location_id
+                      WHERE l.lat BETWEEN %s AND %s AND l.lon BETWEEN %s AND %s
+                      ORDER BY e.received_at DESC LIMIT 1"""
+    bounds = (lat - 0.05, lat + 0.05, lon - 0.05, lon + 0.05)
+    with _postgres_connection() as connection:
+        snapshot_row = connection.execute(
+            snapshot_sql, (target_date, *bounds)
+        ).fetchone()
+        if not snapshot_row:
+            snapshot_row = connection.execute(recent_sql, bounds).fetchone()
+        evidence_row = connection.execute(evidence_sql, bounds).fetchone()
+
+    snapshot = _normalise_row(snapshot_row) if snapshot_row else None
+    evidence = dict(evidence_row) if evidence_row else None
+    if evidence:
+        for key in ("observed_at", "received_at"):
+            evidence[key] = evidence[key].isoformat() if evidence.get(key) else None
+        if isinstance(evidence.get("raw_payload"), str):
+            evidence["raw_payload"] = json.loads(evidence["raw_payload"])
+    return snapshot, evidence
 
 
 def load_progressive_state(tracking_key: str) -> dict[str, Any] | None:

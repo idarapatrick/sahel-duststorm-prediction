@@ -15,7 +15,7 @@ load_dotenv()
 
 from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_for_date, get_location_name
 from alert_tracker import get_all_tracked, clear_expired
-from history_store import RETENTION_DAYS, database_status, query_latest_environmental_evidence, query_recent_snapshots, query_snapshots, save_snapshot
+from history_store import RETENTION_DAYS, database_status, query_latest_prediction_bundle, query_recent_snapshots, query_snapshots, save_snapshot
 from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
 from rate_limit import RateLimitExceeded, enforce_rate_limit
@@ -360,20 +360,14 @@ async def latest_prediction(lat: float, lon: float):
     """Read the latest centrally stored result without triggering inference."""
     validate_sahel_point(lat, lon)
     central_target = (datetime.now(timezone.utc) + timedelta(days=1)).date()
-    snapshots = query_snapshots(lat, lon, central_target)
-    # During the short midnight rollover, keep serving the last completed
-    # central result until the worker stores the first new target-day revision.
-    if not snapshots:
-        snapshots = query_recent_snapshots(lat, lon, 1)
-    if not snapshots:
+    snapshot, evidence = query_latest_prediction_bundle(lat, lon, central_target)
+    if not snapshot:
         raise HTTPException(404, "No central prediction has been recorded for this location yet")
-    snapshot = snapshots[0]
     recorded_at = datetime.fromisoformat(snapshot["recorded_at"].replace("Z", "+00:00"))
     age_minutes = max(
         0, round((datetime.now(timezone.utc) - recorded_at).total_seconds() / 60, 1)
     )
     surface = snapshot.get("metadata", {}).get("surface_data")
-    evidence = query_latest_environmental_evidence(lat, lon)
     if not surface and evidence:
         surface = {
             "soil_moisture": evidence.get("soil_moisture"),

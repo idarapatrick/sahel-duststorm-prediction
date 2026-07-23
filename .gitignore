@@ -5,5 +5,23 @@ models/*.onnx
 *.tif
 *.npz
 *.h5
+__pycache__/
+*.py[cod]
 backend/.env
-backend/.env.example
+
+# Local editors and AI coding assistants
+/.vscode/
+/.idea/
+/.cursor/
+/.claude/
+/.codex/
+/.agents/
+/data/skills/
+/skills-lock.json
+/CLAUDE.md
+/AGENTS.md
+
+# Local planning and agent-context documents are not repository documentation.
+/FRONTEND_REBUILD.md
+/backend_swe_requirements.md
+/current backend.md

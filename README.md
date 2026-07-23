@@ -11,6 +11,7 @@ This repository contains the machine-learning work, FastAPI backend, PostgreSQL 
 - **Backend API documentation:** [saheldust-backend.onrender.com/docs](https://saheldust-backend.onrender.com/docs)
 - **Backend health check:** [saheldust-backend.onrender.com/api/v1/health](https://saheldust-backend.onrender.com/api/v1/health)
 - **Model service documentation:** [mavencodes-saheldust-api.hf.space/docs](https://mavencodes-saheldust-api.hf.space/docs)
+- **Model service source and Dockerfile:** [Hugging Face Space repository](https://huggingface.co/spaces/mavencodes/saheldust-api/tree/main)
 
 ## Problem and project objective
 
@@ -32,14 +33,14 @@ SahelWatch is an early-warning aid, not a replacement for an official warning is
 ### Community web application
 
 - Responsive SvelteKit interface for desktop and mobile browsers
-- Location selection from all currently covered cities
-- Fresh prediction when the application starts or the location changes
+- Searchable location selection for database-backed cities, towns, and rural communities
+- Immediate retrieval of the latest centrally generated prediction when the application starts or the location changes
 - Progress state that does not display a probability before a result exists
 - Current wind speed, temperature, soil moisture, and AOD when their providers return valid data
 - Plain-language prediction evidence and data-availability warnings
 - Tracking view, current alerts, recent history, and date-based history search
 - Ninety-day rolling retention for prediction records created by the system
-- Optional phone account, OTP flow, login, logout, and OTP-confirmed account deletion
+- Optional Firebase-verified phone account, login, logout, and freshly verified account deletion
 - Privacy policy and terms of use pages
 - Multi-horizon control retained in a disabled “Coming soon” state
 
@@ -51,9 +52,9 @@ SahelWatch is an early-warning aid, not a replacement for an official warning is
 - Remote model inference through the deployed model service
 - PostgreSQL prediction history and environmental evidence storage
 - Request coalescing and short-lived PostgreSQL response caching for near-simultaneous requests
-- Autonomous reinforcement worker that monitors eleven central locations
+- Autonomous reinforcement worker that monitors active forecast grid cells
 - PostgreSQL job claiming with `FOR UPDATE SKIP LOCKED`, safe for multiple workers
-- Immutable prediction revisions every configured monitoring interval
+- Immutable hourly prediction revisions shared by communities mapped to each cell
 - Alert upgrade and downgrade events through a transactional outbox
 - Separate alert-delivery worker with idempotency, retry, and dead-letter handling
 - Worker heartbeat, queue health, rate limiting, retention cleanup, and health reporting
@@ -82,7 +83,7 @@ The progressive pipeline accepts both increases and decreases. If new observatio
 
 ### Continuous reinforcement
 
-The background worker creates monitoring jobs without waiting for users. For each covered location it:
+The background worker creates monitoring jobs without waiting for users. For each active forecast grid cell it:
 
 1. creates or finds the next target-day job;
 2. atomically claims the job from PostgreSQL;
@@ -90,10 +91,16 @@ The background worker creates monitoring jobs without waiting for users. For eac
 4. runs inference again;
 5. stores a new immutable snapshot and its evidence;
 6. creates an outbox event only for a meaningful risk-level transition;
-7. schedules the next evaluation; and
+7. schedules the next hourly evaluation; and
 8. stops after the target monitoring window expires.
 
-The recent-history endpoint can therefore contain predictions made centrally by the worker as well as user-triggered predictions. The 90-day policy is a retention maximum, not a fabricated historical backfill. A date before the service began recording legitimately returns no prediction snapshots.
+The user application reads these central snapshots and does not run inference during login or location switching. Cities, towns, villages, and communities are stored in PostgreSQL and mapped to forecast grid cells. Several nearby places can therefore share one hourly prediction instead of making duplicate model calls. The recent-history endpoint can contain centrally generated snapshots as well as explicitly requested diagnostic predictions. The 90-day policy is a retention maximum, not a fabricated historical backfill. A date before the service began recording legitimately returns no prediction snapshots.
+
+### Geographic coverage
+
+Coverage is not restricted to AERONET station locations. AERONET is an independent evaluation source where a station exists, while operational inputs are obtained from gridded Open-Meteo, SMAP, and MODIS products. The database catalogue distinguishes `operational` places from `provisional` places whose local performance checks are still continuing. A broad coordinate boundary is an input guard, not proof that every point inside it has been validated.
+
+`GET /api/v1/coverage/places` returns the active catalogue and supports text and country filtering. `GET /api/v1/coverage/nearest` maps a device coordinate to the nearest monitored community and its shared forecast cell. Migration `010_coverage_catalogue.sql` seeds the original locations plus regional and rural communities in Niger, Nigeria, Burkina Faso, Mali, Chad, Senegal, and Mauritania. Nearby communities such as Libore, Wamakko, Kumbotso, Jere, and Saaba demonstrate the shared-cell mapping.
 
 ### Multi-horizon limitation
 
@@ -137,7 +144,7 @@ and alert outbox         and delivery records
 | Web hosting | Vercel |
 | API and workers | Render |
 | Model hosting | Hugging Face Spaces |
-| SMS integration | Africa's Talking adapter; live delivery remains operationally dependent on approved provider credentials and sender configuration |
+| Authentication and SMS | Firebase Phone Authentication and Twilio alert delivery, with a temporary Africa's Talking rollback adapter during migration |
 
 ## Installation and local execution
 
@@ -260,11 +267,11 @@ npm run check
 npm run build
 ```
 
-The repository also contains focused backend checks for history, current conditions, monitoring windows, and daily-horizon label construction. Install `pytest` in the backend environment before running them:
+The repository also contains focused backend checks for history, current conditions, satellite fallback, monitoring windows, and daily-horizon label construction. Install the development requirements before running them:
 
 ```bash
 cd backend
-python -m pip install pytest
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
@@ -276,7 +283,7 @@ The assessed demonstration focuses on functionality testing rather than unit-tes
 
 | Strategy | Demonstration | Expected evidence |
 |---|---|---|
-| Normal input | Select a covered city and request a prediction | Probability, risk level, location, conditions, and evidence are returned |
+| Normal input | Select a monitored community and request a prediction | Probability, risk level, location, conditions, and evidence are returned |
 | Different data values | Compare multiple Sahel cities | The system retrieves location-specific inputs and does not hard-code one result |
 | Invalid input | Submit coordinates outside the supported range | HTTP 400 response with a clear validation message |
 | Missing upstream field | Inspect a result when satellite data is unavailable | Field is marked unavailable or degraded; the client does not invent a value |
@@ -355,8 +362,11 @@ The implementation separates API routing, data acquisition, prediction models, p
 │   ├── reinforcement_worker.py       # Autonomous central monitoring worker
 │   ├── alert_store.py                # Outbox, delivery, heartbeat and queue storage
 │   ├── alert_delivery_worker.py      # SMS delivery worker
-│   ├── auth_store.py                 # Phone OTP, sessions and deletion workflow
+│   ├── auth_store.py                 # Application sessions and temporary legacy OTP adapter
+│   ├── firebase_auth.py              # Firebase token verification and identity linking
+│   ├── sms_provider.py               # Twilio alerts and temporary rollback adapter
 │   ├── migrations/                   # Versioned PostgreSQL schema changes
+│   ├── functional_probe.py            # Deployed per-location, failure and latency probes
 │   └── tests/                        # Focused backend checks
 ├── frontend/
 │   ├── src/routes/                   # Dashboard, privacy and terms pages
@@ -365,8 +375,10 @@ The implementation separates API routing, data acquisition, prediction models, p
 │   ├── src/lib/components/           # Onboarding, header and map components
 │   └── src/lib/styles/               # Themes, glass surfaces and animation
 ├── ml/
+│   ├── dust_model.py                 # Reusable dual-encoder and attention architecture
 │   ├── multi_horizon_model.py        # Pending day+0/day+1/day+2 heads
-│   └── daily_horizon_labels.py       # Date-aware, non-fabricated daily labels
+│   ├── daily_horizon_labels.py       # Date-aware, non-fabricated daily labels
+│   └── evaluate_failure_slices.py    # Seasonal, coastal and per-location evaluation
 ├── notebooks/                        # Preprocessing, evaluation and validation work
 ├── docs/
 │   ├── deployment.md                 # Production deployment instructions
@@ -377,7 +389,7 @@ The implementation separates API routing, data acquisition, prediction models, p
 
 ## Discussion and impact
 
-The principal engineering milestone is the move from an isolated prediction screen to a durable monitoring system. A user request can create a prediction immediately, while independent workers continue checking central locations, store every revision, and prepare higher-risk transitions for delivery. This matters in the Sahel because users should not need to keep an application open for monitoring to continue.
+The principal engineering milestone is the move from an isolated prediction screen to a durable monitoring system. Independent workers check central locations each hour, store every revision, and prepare higher-risk transitions for delivery. Users read the latest completed database snapshot instead of waiting for environmental collection and model inference. This matters in the Sahel because monitoring continues when nobody has the application open and a large group of users can share one prediction result.
 
 The use of forecast atmospheric data with the latest available satellite surface evidence reflects the different update frequencies of the providers. MODIS AOD and SMAP are observational inputs, not future forecasts. Their observation dates and availability must therefore remain visible and must never be represented as future measurements.
 
