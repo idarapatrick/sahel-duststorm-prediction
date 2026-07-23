@@ -37,6 +37,7 @@
 	let showAuth = false;
 	let online = true;
 	let locationRequest = 0;
+	let fetchingPrediction = false;
 	let historyLoading = false;
 	let historyMessage = '';
 	let activeTab: 'overview' | 'tracking' | 'history' | 'notifications' | 'settings' = 'overview';
@@ -52,7 +53,9 @@
 	$: riskTone = prediction.riskLevel;
 	$: horizon = dailyHorizons?.horizons.find((x) => x.horizon === selectedHorizon) || dailyHorizons?.horizons[0];
 	$: conditions = dailyHorizons?.conditions || progressive?.conditions || prediction.conditions;
-	$: aodSource = prediction.inputQuality?.fields?.previous_day_aod?.source;
+	$: aodQuality = prediction.inputQuality?.fields?.previous_day_aod;
+	$: aodAvailable = aodQuality?.available === true || (!aodQuality && conditions?.aod != null && conditions.aod > 0);
+	$: aodSource = aodQuality?.source;
 	$: aodDescription = aodSource === 'modis'
 		? 'Latest available satellite dust reading'
 		: aodSource === 'cams-global'
@@ -74,6 +77,7 @@
 
 	async function loadLocation(location: Location) {
 		const requestNumber = ++locationRequest;
+		fetchingPrediction = true;
 		const previousPrediction = selected.name === location.name && prediction.available !== false ? prediction : cachedPrediction(location);
 		selected = location; history = []; historyMessage = '';
 		localStorage.setItem('sahelwatch:location', JSON.stringify(location));
@@ -88,6 +92,7 @@
 		online = central.ok;
 		progressive = null;
 		dailyHorizons = null;
+		fetchingPrediction = false;
 		loadRecentHistory();
 	}
 
@@ -210,7 +215,7 @@
 		{#if activeTab === 'overview'}
 			<section class="hero" aria-labelledby="forecast-heading">
 				<div class="hero-copy">
-					<div class="place"><i class:demo={!online}></i>{online ? 'Latest dust outlook' : 'Dust outlook unavailable'} · {selected.name}, {selected.country}</div>
+					<div class="place"><i class:demo={!online}></i>{fetchingPrediction ? `Fetching latest predictions for ${selected.name}` : online ? 'Latest dust outlook' : 'Dust outlook unavailable'}{fetchingPrediction ? '' : ` · ${selected.name}, ${selected.country}`}</div>
 					<p class="eyebrow">Next 24–48 hours</p>
 					<h1 id="forecast-heading">{riskCopy}<span class="risk-word {riskTone}">{prediction.available === false ? 'Try again shortly' : `${probability}% risk`}</span></h1>
 					<p class="summary">SahelWatch checks wind, heat, ground dryness and dust in the air to give communities early notice of possible dusty conditions.</p>
@@ -234,10 +239,10 @@
 				<article class="glass"><span class="metric-icon"><Wind size={20}/></span><div><p>Wind speed</p><strong>{conditions ? `${conditions.windSpeedKmh} km/h` : 'Unavailable'}</strong><small>{conditions ? `${conditions.windDirectionDeg}° direction` : 'Latest wind reading'}</small></div></article>
 				<article class="glass"><span class="metric-icon"><Thermometer size={20}/></span><div><p>Temperature</p><strong>{conditions ? `${conditions.temperatureC}°C` : 'Unavailable'}</strong><small>Latest reading near this area</small></div></article>
 				<article class="glass"><span class="metric-icon"><Droplets size={20}/></span><div><p>Soil moisture</p><strong>{conditions ? `${(conditions.soilMoisture * 100).toFixed(1)}%` : progressive ? `${(progressive.soilMoisture * 100).toFixed(1)}%` : 'Unavailable'}</strong><small>Drier ground can release more dust</small></div></article>
-				<article class="glass"><span class="metric-icon"><Gauge size={20}/></span><div><p>Dust in the air</p><strong>{conditions?.aod != null ? conditions.aod.toFixed(2) : progressive?.aod != null ? progressive.aod.toFixed(2) : 'Unavailable'}</strong><small>{aodDescription}</small></div></article>
+				<article class="glass"><span class="metric-icon"><Gauge size={20}/></span><div><p>Dust in the air</p><strong>{aodAvailable && conditions?.aod != null ? conditions.aod.toFixed(2) : aodAvailable && progressive?.aod != null ? progressive.aod.toFixed(2) : 'Unavailable'}</strong><small>{aodAvailable ? aodDescription : 'No valid dust reading in this stored update'}</small></div></article>
 			</section>
 
-			{#if prediction.inputQuality?.degraded || progressive?.inputQuality?.degraded}<div class="data-warning" role="status"><Info size={18}/><p><strong>Some satellite readings are not available.</strong> The dust outlook may change when newer readings arrive. Please check again later.</p></div>{/if}
+			{#if prediction.inputQuality?.degraded || progressive?.inputQuality?.degraded}<div class="data-warning" role="status"><Info size={18}/><p>{#if !aodAvailable}<strong>Dust-in-air data was unavailable for this stored update.</strong> The next central update will use current atmospheric analysis when a recent satellite reading is delayed.{:else}<strong>Some satellite surface readings are delayed.</strong> Available weather analysis was used and the outlook will update when newer observations arrive.{/if}</p></div>{/if}
 			<section class="explanation glass">
 				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% chance of dusty conditions` : online ? `Latest dust outlook for ${selected.name}` : 'Dust information is temporarily unavailable'}</h2><p>{progressive?.message || (online ? 'This outlook updates automatically as new wind, temperature, ground and satellite readings arrive.' : 'Please check your connection and try again shortly.')}</p><small>{progressive ? `${progressive.observedHours} recent weather readings are available; the remaining hours use the latest weather forecast.` : 'Weather details are shown only when recent readings are available.'}</small></div>
 			</section>
