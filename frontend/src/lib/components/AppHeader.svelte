@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Search, Moon, Sun, ChevronDown, Wind } from 'lucide-svelte';
 	import type { Location } from '$lib/types';
-	import { createEventDispatcher, onMount } from 'svelte';
+	import { createEventDispatcher, onDestroy, onMount } from 'svelte';
 
 	export let selected: Location;
 	export let locations: Location[] = [];
@@ -10,8 +10,16 @@
 	let query = '';
 	let dark = false;
 	let open = false;
+	let headerElement: HTMLElement;
 
-	onMount(() => dark = document.documentElement.dataset.theme === 'dark');
+	function closeOutside(event: PointerEvent) {
+		if (open && headerElement && !headerElement.contains(event.target as Node)) open = false;
+	}
+	onMount(() => {
+		dark = document.documentElement.dataset.theme === 'dark';
+		document.addEventListener('pointerdown', closeOutside);
+	});
+	onDestroy(() => document.removeEventListener('pointerdown', closeOutside));
 	$: filtered = locations.filter((x) => `${x.name} ${x.country}`.toLowerCase().includes(query.toLowerCase()));
 
 	function toggleTheme() {
@@ -22,7 +30,7 @@
 	function choose(location: Location) { selected = location; dispatch('select', location); open = false; query = ''; }
 </script>
 
-<header class="header glass">
+<header class="header glass" bind:this={headerElement}>
 	<a class="brand" href="/" aria-label="SahelWatch home">
 		<span class="mark"><Wind size={21} strokeWidth={2.2} /></span>
 		<span><strong>SahelWatch</strong><small>Dust intelligence, hours ahead</small></span>
@@ -31,7 +39,7 @@
 		<label class="search">
 			<Search size={18} aria-hidden="true" />
 			<span class="sr-only">Search a covered Sahel community</span>
-			<input bind:value={query} on:focus={() => open = true} placeholder="Search a city, town or village" autocomplete="off" />
+			<input bind:value={query} on:focus={() => open = true} on:keydown={(event) => { if (event.key === 'Escape') open = false; }} placeholder="Search a city, town or village" autocomplete="off" />
 		</label>
 		{#if open}
 			<div class="results glass">
@@ -43,7 +51,7 @@
 	</div>
 	<div class="actions">
 		<div class="status" title={online ? 'Live updates connected' : 'Live updates unavailable'}><i class:offline={!online}></i><span>{online ? 'Live updates' : 'Updates offline'}</span></div>
-		<button class="location" on:click={() => open = !open} aria-expanded={open}><span>{selected.name}</span><ChevronDown size={16} /></button>
+		<button class="location" on:click={() => open = !open} aria-expanded={open} aria-haspopup="listbox"><span>{selected.name}</span><ChevronDown size={16} /></button>
 		<button class="icon" on:click={toggleTheme} aria-label={dark ? 'Use light theme' : 'Use dark theme'}>{#if dark}<Sun size={20} />{:else}<Moon size={20} />{/if}</button>
 	</div>
 </header>

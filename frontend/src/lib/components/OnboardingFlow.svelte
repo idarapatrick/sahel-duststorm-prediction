@@ -2,7 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import { ArrowLeft, ArrowRight, Check, LocateFixed, MessageSquare, Phone, ShieldCheck, X } from 'lucide-svelte';
 	import { createFirebaseSession, getNearestCoveredLocation, requestOtp, verifyOtp } from '$lib/api';
-	import { firebaseAuthEnabled, finishFirebasePhoneVerification, startFirebasePhoneVerification } from '$lib/firebase';
+	import { firebaseAuthEnabled, finishFirebasePhoneVerification, legacyPhoneAuthEnabled, startFirebasePhoneVerification } from '$lib/firebase';
 	import type { ConfirmationResult } from 'firebase/auth';
 	import { DEFAULT_LOCATION, SAHEL_BOUNDS } from '$lib/locations';
 	import type { Location } from '$lib/types';
@@ -46,7 +46,8 @@
 		busy = true; message = '';
 		try {
 			if (firebaseAuthEnabled()) firebaseConfirmation = await startFirebasePhoneVerification(phone, 'firebase-recaptcha');
-			else { const result = await requestOtp(phone, purpose, deviceId); challengeId = result.challenge_id; }
+			else if (legacyPhoneAuthEnabled()) { const result = await requestOtp(phone, purpose, deviceId); challengeId = result.challenge_id; }
+			else throw new Error('Phone verification is not ready on this deployment. The Firebase web settings must be added in Vercel, then the frontend must be redeployed.');
 			step = 'otp';
 		} catch (error) { message = error instanceof Error ? error.message : 'Could not send the verification code.'; }
 		finally { busy = false; }
@@ -57,7 +58,9 @@
 		try {
 			const result = firebaseAuthEnabled()
 				? await finishFirebasePhoneVerification(firebaseConfirmation!, code).then(({ idToken }) => createFirebaseSession(idToken, purpose, deviceId, purpose === 'signup' ? selected : undefined))
-				: await verifyOtp(challengeId, code, purpose === 'signup' ? selected : undefined);
+				: legacyPhoneAuthEnabled()
+					? await verifyOtp(challengeId, code, purpose === 'signup' ? selected : undefined)
+					: (() => { throw new Error('Phone verification is not configured for this deployment.'); })();
 			finish(result.phone_uid);
 		} catch (error) { message = error instanceof Error ? error.message : 'Could not verify this code.'; }
 		finally { busy = false; }

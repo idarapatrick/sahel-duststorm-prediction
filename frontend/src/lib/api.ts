@@ -1,19 +1,12 @@
 import { env } from '$env/dynamic/public';
-import type { ActiveAlert, AuthState, DailyHorizonResponse, Forecast, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence, RiskLevel } from './types';
+import type { ActiveAlert, AuthState, DailyHorizonResponse, HistoricalSnapshot, Location, Prediction } from './types';
 
 const base = (env.PUBLIC_API_BASE_URL || 'https://saheldust-backend.onrender.com').replace(/\/$/, '');
 const timeoutMs = 75_000;
 
-function alertLevel(probability: number): RiskLevel {
-	if (probability >= .7) return 'alert';
-	if (probability >= .5) return 'warning';
-	if (probability >= .3) return 'watch';
-	return 'clear';
-}
-
-async function getJson(path: string) {
+async function getJson(path: string, requestTimeoutMs = timeoutMs) {
 	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), timeoutMs);
+	const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 	try {
 		const response = await fetch(`${base}${path}`, { signal: controller.signal, credentials: 'include' });
 		if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail || `Request failed (${response.status})`);
@@ -114,7 +107,7 @@ export async function getNotifications() {
 
 export async function getLatestPrediction(location: Location): Promise<Prediction> {
 	const point = forecastCoordinates(location);
-	const d = await getJson(`/api/v1/predictions/latest?lat=${point.lat}&lon=${point.lon}`);
+	const d = await getJson(`/api/v1/predictions/latest?lat=${point.lat}&lon=${point.lon}`, 3_000);
 	const x = d.prediction;
 	const c = d.current_conditions;
 	return { lat: x.lat, lon: x.lon, locationName: x.location_name, probability: x.probability,
@@ -134,62 +127,6 @@ export async function getCurrentConditions(location: Location) {
 	const point = forecastCoordinates(location);
 	const d = await getJson(`/api/v1/conditions/current?lat=${point.lat}&lon=${point.lon}`);
 	return d.current_conditions;
-}
-
-export async function getPrediction(location: Location): Promise<Prediction> {
-	const point = forecastCoordinates(location);
-	const d = await getJson(`/api/v1/predict/location?lat=${point.lat}&lon=${point.lon}`);
-	const c = d.current_conditions;
-	return {
-		lat: d.lat, lon: d.lon, locationName: d.location_name, probability: d.probability,
-		riskLevel: alertLevel(d.probability), dustEvent: d.dust_event,
-		predictionDate: d.prediction_date, dataSource: d.data_source,
-		conditions: c ? {
-			observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh,
-			windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c,
-			surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm,
-			dewpointC: c.dewpoint_c ?? 0,
-			soilMoisture: c.soil_moisture ?? d.surface_data?.soil_moisture ?? 0,
-			vegetationWaterContent: d.surface_data?.vegetation_water_content ?? 0,
-			aod: d.surface_data?.prev_day_aod ?? 0
-		} : undefined,
-		surfaceData: d.surface_data ? {
-			soilMoisture: d.surface_data.soil_moisture,
-			vegetationWaterContent: d.surface_data.vegetation_water_content,
-			aod: d.surface_data.prev_day_aod
-		} : undefined,
-		inputQuality: d.input_quality ? { degraded: d.input_quality.degraded, warning: d.input_quality.warning, fields: d.input_quality } : undefined,
-		available: true
-	};
-}
-
-export async function getForecast(location: Location): Promise<Forecast> {
-	const point = forecastCoordinates(location);
-	const d = await getJson(`/api/v1/forecast?lat=${point.lat}&lon=${point.lon}&days=3`);
-	return { lat: d.lat, lon: d.lon, locationName: d.location_name, generatedAt: d.generated_at, days: d.days.map((x: any) => ({ date: x.date, probability: x.probability, risk: x.risk_level, dustEvent: x.dust_event })) };
-}
-
-export async function getProgressiveEvidence(location: Location): Promise<ProgressiveEvidence> {
-	const point = forecastCoordinates(location);
-	const d = await getJson(`/api/v1/predict/progressive?lat=${point.lat}&lon=${point.lon}`);
-	const c = d.current_conditions;
-	return {
-		probability: d.probability, riskLevel: d.alert_level, targetDate: d.target_date,
-		hoursUntilEvent: d.hours_until_event, confidencePct: d.data_composition.confidence_pct,
-		observedHours: d.data_composition.hours_real_observations,
-		forecastHours: d.data_composition.hours_forecast_data, trend: d.trend,
-		soilMoisture: d.surface_data.soil_moisture,
-		vegetationWaterContent: d.surface_data.vegetation_water_content,
-		aod: d.surface_data.prev_day_aod, message: d.alert_message,
-		conditions: c ? {
-			observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh,
-			windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c,
-			surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm,
-			dewpointC: c.dewpoint_c, soilMoisture: c.soil_moisture,
-			vegetationWaterContent: c.vegetation_water_content, aod: c.aod
-		} : undefined,
-		inputQuality: d.input_quality ? { degraded: d.input_quality.degraded, warning: d.input_quality.warning } : undefined
-	};
 }
 
 export async function getHistory(location: Location, date: string): Promise<HistoricalSnapshot[]> {

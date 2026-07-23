@@ -5,7 +5,13 @@ import { RecaptchaVerifier, getAuth, signInWithPhoneNumber, signOut } from 'fire
 import type { ConfirmationResult } from 'firebase/auth';
 
 export function firebaseAuthEnabled() {
-	return env.PUBLIC_AUTH_PROVIDER === 'firebase' && Boolean(env.PUBLIC_FIREBASE_API_KEY && env.PUBLIC_FIREBASE_PROJECT_ID);
+	return (env.PUBLIC_AUTH_PROVIDER || 'firebase') === 'firebase' && Boolean(
+		env.PUBLIC_FIREBASE_API_KEY && env.PUBLIC_FIREBASE_PROJECT_ID && env.PUBLIC_FIREBASE_APP_ID
+	);
+}
+
+export function legacyPhoneAuthEnabled() {
+	return env.PUBLIC_AUTH_PROVIDER === 'legacy_otp';
 }
 
 function auth() {
