@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Search, Moon, Sun, ChevronDown, Wind } from 'lucide-svelte';
 	import type { Location } from '$lib/types';
-	import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+	import { createEventDispatcher, onMount } from 'svelte';
 
 	export let selected: Location;
 	export let locations: Location[] = [];
@@ -18,8 +18,8 @@
 	onMount(() => {
 		dark = document.documentElement.dataset.theme === 'dark';
 		document.addEventListener('pointerdown', closeOutside);
+		return () => document.removeEventListener('pointerdown', closeOutside);
 	});
-	onDestroy(() => document.removeEventListener('pointerdown', closeOutside));
 	$: filtered = locations.filter((x) => `${x.name} ${x.country}`.toLowerCase().includes(query.toLowerCase()));
 
 	function toggleTheme() {
