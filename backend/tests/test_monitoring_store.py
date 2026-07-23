@@ -18,11 +18,11 @@ class MonitoringLifecycleTests(unittest.TestCase):
             tracking_key(14.69002, -17.44002, target),
         )
 
-    def test_window_runs_from_minus_60_to_plus_12_hours(self):
+    def test_window_collects_from_minus_60_hours_through_target_day(self):
         start, end = monitoring_window(date(2026, 7, 17))
         self.assertEqual(start, datetime(2026, 7, 14, 12, tzinfo=timezone.utc))
-        self.assertEqual(end, datetime(2026, 7, 17, 12, tzinfo=timezone.utc))
-        self.assertEqual((end - start).total_seconds() / 3600, 72)
+        self.assertEqual(end, datetime(2026, 7, 18, 0, tzinfo=timezone.utc))
+        self.assertEqual((end - start).total_seconds() / 3600, 84)
 
     def test_cache_key_coalesces_nearby_requests_in_same_time_bucket(self):
         instant = datetime(2026, 7, 16, 12, 3, tzinfo=timezone.utc)

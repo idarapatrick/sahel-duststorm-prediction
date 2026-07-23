@@ -4,7 +4,7 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import OnboardingFlow from '$lib/components/OnboardingFlow.svelte';
 	import { DEFAULT_LOCATION, locations as fallbackLocations } from '$lib/locations';
-	import { confirmAccountDeletion, deleteFirebaseAccount, demoPrediction, getActiveAlerts, getAuthState, getCoveredLocations, getHistory, getLatestPrediction, getNotifications, getRecentHistory, logout, requestAccountDeletionOtp, saveAlertSubscription } from '$lib/api';
+	import { ApiRequestError, confirmAccountDeletion, deleteFirebaseAccount, demoPrediction, getActiveAlerts, getAuthState, getCoveredLocations, getHistory, getLatestPrediction, getNotifications, getRecentHistory, logout, requestAccountDeletionOtp, saveAlertSubscription } from '$lib/api';
 	import { finishFirebasePhoneVerification, signOutFirebase, startFirebasePhoneVerification } from '$lib/firebase';
 	import type { ConfirmationResult } from 'firebase/auth';
 	import type { ActiveAlert, AuthState, DailyHorizonResponse, HistoricalSnapshot, Location, Prediction, ProgressiveEvidence } from '$lib/types';
@@ -39,6 +39,9 @@
 	let online = true;
 	let locationRequest = 0;
 	let fetchingPrediction = false;
+	let predictionLoadState: 'loading' | 'ready' | 'pending' | 'offline' = 'loading';
+	let coverageLoading = true;
+	let coverageError = '';
 	let historyLoading = false;
 	let historyMessage = '';
 	let activeTab: 'overview' | 'tracking' | 'history' | 'notifications' | 'settings' = 'overview';
@@ -53,6 +56,9 @@
 	$: riskCopy = prediction.available === false ? 'Prediction temporarily unavailable' : prediction.riskLevel === 'clear' ? 'No significant storm expected' : prediction.riskLevel === 'watch' ? 'Dust activity is possible' : prediction.riskLevel === 'warning' ? 'Dust storm conditions are likely' : 'Severe dust event expected';
 	$: riskTone = prediction.riskLevel;
 	$: horizon = dailyHorizons?.horizons.find((x) => x.horizon === selectedHorizon) || dailyHorizons?.horizons[0];
+	$: currentOutlook = prediction.outlooks?.find((item) => item.targetDate === today);
+	$: nextOutlookDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+	$: nextOutlook = prediction.outlooks?.find((item) => item.targetDate === nextOutlookDate);
 	$: conditions = dailyHorizons?.conditions || progressive?.conditions || prediction.conditions;
 	$: aodEvidence = prediction.environmentalEvidence?.find((item) => item.variableName === 'previous_day_aod');
 	$: soilEvidence = prediction.environmentalEvidence?.find((item) => item.variableName === 'soil_moisture');
@@ -124,33 +130,44 @@
 		return 'The sky is very hazy with a very high amount of airborne particles';
 	}
 
-	function predictionCacheKey(location: Location) {
-		return `sahelwatch:central:${(location.forecastLat ?? location.lat).toFixed(2)}:${(location.forecastLon ?? location.lon).toFixed(2)}`;
-	}
-	function cachedPrediction(location: Location): Prediction | null {
-		try {
-			const value = localStorage.getItem(predictionCacheKey(location));
-			return value ? JSON.parse(value) as Prediction : null;
-		} catch { return null; }
-	}
-	function rememberPrediction(location: Location, value: Prediction) {
-		try { localStorage.setItem(predictionCacheKey(location), JSON.stringify(value)); } catch { /* Storage may be disabled. */ }
-	}
-
 	async function loadLocation(location: Location) {
 		const requestNumber = ++locationRequest;
 		fetchingPrediction = true;
-		const previousPrediction = selected.name === location.name && prediction.available !== false ? prediction : cachedPrediction(location);
+		predictionLoadState = 'loading';
 		selected = location; history = []; historyMessage = '';
 		localStorage.setItem('sahelwatch:location', JSON.stringify(location));
-		prediction = previousPrediction || demoPrediction(location);
+		prediction = demoPrediction(location);
 		const central = await getLatestPrediction(location).then(
 			(value) => ({ ok: true as const, value }),
-			() => ({ ok: false as const })
+			(error: unknown) => ({ ok: false as const, error })
 		);
 		if (requestNumber !== locationRequest) return;
-		prediction = central.ok ? central.value : (previousPrediction || demoPrediction(location));
-		if (central.ok) rememberPrediction(location, central.value);
+		const isCurrentDay = central.ok && central.value.predictionDate === today;
+		if (isCurrentDay) {
+			prediction = central.value;
+		} else if (central.ok) {
+			const returnedOutlook = {
+				targetDate: central.value.predictionDate,
+				probability: central.value.probability,
+				riskLevel: central.value.riskLevel,
+				recordedAt: central.value.freshness?.recordedAt || new Date().toISOString()
+			};
+			prediction = {
+				...demoPrediction(location),
+				outlooks: central.value.outlooks?.length
+					? central.value.outlooks
+					: [returnedOutlook]
+			};
+		} else {
+			prediction = demoPrediction(location);
+		}
+		predictionLoadState = isCurrentDay
+			? 'ready'
+			: central.ok
+				? 'pending'
+			: central.error instanceof ApiRequestError && central.error.status === 404
+				? 'pending'
+				: 'offline';
 		online = central.ok;
 		progressive = null;
 		dailyHorizons = null;
@@ -162,11 +179,31 @@
 		try { activeAlerts = await getActiveAlerts(); } catch { activeAlerts = []; }
 		if (authState.authenticated) { try { userNotifications = await getNotifications(); } catch { userNotifications = []; } }
 	}
+	async function loadCoverage() {
+		coverageLoading = true;
+		coverageError = '';
+		try {
+			const covered = await getCoveredLocations();
+			if (!covered.length) throw new Error('No covered communities were returned.');
+			locations = covered;
+			if (!covered.some((location) => location.name === selected.name && location.country === selected.country)) {
+				selected = covered[0];
+			}
+		} catch {
+			coverageError = 'Check that the SahelWatch backend is running, then try again.';
+		} finally {
+			coverageLoading = false;
+		}
+	}
 	async function refreshCentralPrediction() {
 		try {
 			const latest = await getLatestPrediction(selected);
-			prediction = latest; rememberPrediction(selected, latest); online = true;
-		} catch { /* Keep the last explicit state; never synthesize a probability. */ }
+			prediction = latest; predictionLoadState = 'ready'; online = true;
+		} catch (error) {
+			if (predictionLoadState !== 'ready') {
+				predictionLoadState = error instanceof ApiRequestError && error.status === 404 ? 'pending' : 'offline';
+			}
+		}
 		loadAlerts();
 	}
 	async function updateSubscription() {
@@ -230,7 +267,7 @@
 		if (new URLSearchParams(window.location.search).get('tab') === 'settings') activeTab = 'settings';
 		import('$lib/components/PredictionMap.svelte').then((module) => PredictionMapComponent = module.default);
 		deviceId = localStorage.getItem('sahelwatch:device_id') || crypto.randomUUID(); localStorage.setItem('sahelwatch:device_id', deviceId);
-		getCoveredLocations().then((covered) => { if (covered.length) locations = covered; }).catch(() => {});
+		loadCoverage();
 		const savedLocation = localStorage.getItem('sahelwatch:location');
 		if (savedLocation) { try { selected = JSON.parse(savedLocation); } catch { /* use default */ } }
 		const alreadyShown = sessionStorage.getItem('sahelwatch:splash_shown') === 'true';
@@ -256,13 +293,13 @@
 {#if showSplash}
 	<div class="splash" role="status" aria-label="Loading SahelWatch"><span><Wind size={34}/></span><strong>SahelWatch</strong><small>Preparing dust intelligence</small></div>
 {:else if showOnboarding}
-	<OnboardingFlow {deviceId} {locations} initialLocation={selected} on:complete={finishOnboarding}/>
+	<OnboardingFlow {deviceId} {locations} initialLocation={selected} {coverageLoading} {coverageError} on:retryCoverage={loadCoverage} on:complete={finishOnboarding}/>
 {/if}
-{#if showAuth}<OnboardingFlow {deviceId} {locations} initialLocation={selected} authOnly on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
+{#if showAuth}<OnboardingFlow {deviceId} {locations} initialLocation={selected} authOnly {coverageLoading} {coverageError} on:retryCoverage={loadCoverage} on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
 {#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span>{#if deleteStep === 'confirm'}<h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">SMS alerts and sign-ins will stop immediately. Your phone account and alert choices will be permanently removed after seven days. We will send a code to +{linkedPhone} first.</p><div id="delete-firebase-recaptcha"></div>{:else}<h2 id="delete-title">Enter the code from your phone</h2><p id="delete-description">Enter the six-digit code sent to +{linkedPhone}. After verification, the account will be deactivated and scheduled for removal in seven days.</p><label for="delete-code">Verification code</label><input id="delete-code" class="delete-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={deleteCode} placeholder="000000" />{/if}{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={closeDeleteDialog}>Keep account</button>{#if deleteStep === 'confirm'}<button class="delete-confirm" disabled={settingsBusy} on:click={sendDeleteCode}>{settingsBusy ? 'Sending code...' : 'Send code'}</button>{:else}<button class="delete-confirm" disabled={settingsBusy || deleteCode.length !== 6} on:click={removeAccount}>{settingsBusy ? 'Scheduling...' : 'Verify and schedule deletion'}</button>{/if}</div></section></div>{/if}
 
 <div class="app-shell">
-	{#if prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
+	{#if predictionLoadState === 'ready' && prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
 	<AppHeader bind:selected {locations} {online} on:select={(e) => loadLocation(e.detail)} />
 
 	<nav class="tabs glass" aria-label="Primary navigation">
@@ -274,11 +311,45 @@
 	</nav>
 
 	<main id="main-content">
-		{#if activeTab === 'overview'}
+		{#if fetchingPrediction && activeTab === 'overview'}
+			<section class="prediction-loading" role="status" aria-live="polite" aria-busy="true">
+				<div class="loading-mark" aria-hidden="true"><Activity size={30}/></div>
+				<p class="eyebrow">Latest central update</p>
+				<h1>Fetching predictions for {selected.name}</h1>
+				<p>SahelWatch is retrieving the latest stored outlook and environmental readings for this location.</p>
+				<div class="loading-track" aria-hidden="true"><span></span></div>
+			</section>
+		{:else if predictionLoadState === 'pending' && activeTab === 'overview'}
+			<section class="forecast-strip glass" aria-label="Daily central outlooks">
+				<div><p class="eyebrow">Central outlooks</p><strong>Present and future days</strong><small>These results are prepared centrally and shared with every user.</small></div>
+				<div class="day"><span>Today</span><strong>Preparing</strong><small>Central update pending</small></div>
+				<div class="day"><span>Tomorrow</span><strong>{nextOutlook ? `${Math.round(nextOutlook.probability * 100)}%` : 'Preparing'}</strong><small>{nextOutlook?.riskLevel || 'Central update pending'}</small></div>
+				<div class="day"><span>Day after tomorrow</span><strong>N/A</strong><small>Coming after model validation</small></div>
+			</section>
+			<section class="prediction-state" role="status" aria-live="polite">
+				<div class="loading-mark"><Clock3 size={30}/></div>
+				<p class="eyebrow">Today’s central update</p>
+				<h1>The outlook for {selected.name} is being prepared</h1>
+				<p>The central service has not stored today’s result yet. SahelWatch will display it automatically when it arrives.</p>
+			</section>
+		{:else if predictionLoadState === 'offline' && activeTab === 'overview'}
+			<section class="prediction-state" role="alert">
+				<div class="loading-mark offline"><Info size={30}/></div>
+				<p class="eyebrow">Connection delayed</p>
+				<h1>Today’s outlook could not be retrieved</h1>
+				<p>SahelWatch could not reach the central records for {selected.name}. It will try again automatically.</p>
+			</section>
+		{:else if activeTab === 'overview'}
+			<section class="forecast-strip glass" aria-label="Daily central outlooks">
+				<div><p class="eyebrow">Central outlooks</p><strong>Present and future days</strong><small>These results are prepared centrally and shared with every user.</small></div>
+				<div class="day"><span>Today</span><strong>{currentOutlook ? `${Math.round(currentOutlook.probability * 100)}%` : `${probability}%`}</strong><small>{currentOutlook?.riskLevel || prediction.riskLevel}</small></div>
+				<div class="day"><span>Tomorrow</span><strong>{nextOutlook ? `${Math.round(nextOutlook.probability * 100)}%` : 'Preparing'}</strong><small>{nextOutlook?.riskLevel || 'Central update pending'}</small></div>
+				<div class="day"><span>Day after tomorrow</span><strong>N/A</strong><small>Coming after model validation</small></div>
+			</section>
 			<section class="hero" aria-labelledby="forecast-heading">
 				<div class="hero-copy">
-					<div class="place"><i class:demo={!online}></i>{fetchingPrediction ? `Fetching latest predictions for ${selected.name}` : online ? 'Latest dust outlook' : 'Dust outlook unavailable'}{fetchingPrediction ? '' : ` · ${selected.name}, ${selected.country}`}</div>
-					<p class="eyebrow">Next 24–48 hours</p>
+					<div class="place"><i class:demo={!online}></i>{online ? 'Latest dust outlook' : 'Dust outlook unavailable'} · {selected.name}, {selected.country}</div>
+					<p class="eyebrow">{prediction.predictionDate === today ? 'Today’s dust outlook' : `Dust outlook for ${prediction.predictionDate}`}</p>
 					<h1 id="forecast-heading">{riskCopy}<span class="risk-word {riskTone}">{prediction.available === false ? 'Try again shortly' : `${probability}% risk`}</span></h1>
 					<p class="summary">SahelWatch checks wind, heat, ground dryness and dust in the air to give communities early notice of possible dusty conditions.</p>
 					<div class="hero-actions">
@@ -307,11 +378,6 @@
 			{#if confirmedMissingReadings.length > 0}<div class="data-warning" role="status"><Info size={18}/><p><strong>Confirmed missing reading:</strong> {confirmedMissingMessage} SahelWatch used the available readings and will check again during the next central update.</p></div>{/if}
 			<section class="explanation glass">
 				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% chance of dusty conditions` : online ? `Latest dust outlook for ${selected.name}` : 'Dust information is temporarily unavailable'}</h2><p>{progressive?.message || (online ? 'This outlook updates automatically when newer environmental information becomes available.' : 'Please check your connection and try again shortly.')}</p><small>{prediction.evidenceSummary ? `${Math.round(prediction.evidenceSummary.inputCompleteness * 100)}% of expected inputs were available. Each value is marked as a forecast, analysis or reading by the service.` : 'Weather details are shown only when verified source information is available.'}</small></div>
-			</section>
-
-			<section class="forecast-strip glass">
-				<div><p class="eyebrow">Next update</p><strong>Continuous monitoring</strong><small>The central service refreshes every hour without requiring this browser.</small></div>
-				<div class="day"><span>Current target</span><strong>{prediction.available === false ? 'N/A' : `${probability}%`}</strong><small>{prediction.available === false ? 'unavailable' : prediction.riskLevel}</small></div><div class="day"><span>Day+1</span><strong>N/A</strong><small>Coming soon</small></div><div class="day"><span>Day+2</span><strong>N/A</strong><small>Coming soon</small></div>
 			</section>
 
 		{:else if activeTab === 'tracking'}
@@ -372,6 +438,19 @@
 	.tabs button { min-height: 42px; padding: 0 16px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: var(--radius-pill); color: var(--text-secondary); background: transparent; cursor: pointer; transition: var(--ease); }
 	.tabs button.active { color: var(--text); background: var(--surface-solid); box-shadow: var(--shadow-sm); }
 	main { min-height: 70dvh; }
+	.prediction-loading { min-height: 68dvh; padding: 70px 24px; display: grid; place-content: center; justify-items: center; text-align: center; }
+	.prediction-state { min-height: 68dvh; padding: 70px 24px; display: grid; place-content: center; justify-items: center; text-align: center; }
+	.prediction-state .loading-mark { width: 66px; height: 66px; margin-bottom: 24px; display:grid; place-items:center; border-radius:22px; color:var(--blue); background:color-mix(in srgb,var(--blue) 11%,var(--surface)); }
+	.prediction-state .loading-mark.offline { color:var(--orange); background:color-mix(in srgb,var(--orange) 10%,var(--surface)); }
+	.prediction-state h1 { max-width:780px; margin:0; font-size:clamp(2.2rem,6vw,4.8rem); line-height:1; letter-spacing:-.055em; }
+	.prediction-state > p:not(.eyebrow) { max-width:640px; margin:18px 0 0; color:var(--text-secondary); line-height:1.65; }
+	.prediction-loading .loading-mark { width: 66px; height: 66px; margin-bottom: 24px; display: grid; place-items: center; border-radius: 22px; color: var(--blue); background: color-mix(in srgb, var(--blue) 11%, var(--surface)); animation: loading-pulse 1.4s ease-in-out infinite; }
+	.prediction-loading h1 { max-width: 760px; margin: 0; font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: 1; letter-spacing: -.055em; }
+	.prediction-loading > p:not(.eyebrow) { max-width: 620px; margin: 18px 0 28px; color: var(--text-secondary); font-size: 1rem; line-height: 1.65; }
+	.loading-track { width: min(440px, 78vw); height: 7px; overflow: hidden; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--blue) 10%, var(--surface-muted)); }
+	.loading-track span { width: 42%; height: 100%; display: block; border-radius: inherit; background: var(--blue); animation: loading-travel 1.15s ease-in-out infinite; }
+	@keyframes loading-pulse { 50% { transform: scale(1.06); opacity: .72; } }
+	@keyframes loading-travel { from { transform: translateX(-110%); } to { transform: translateX(350%); } }
 	.hero { min-height: 470px; padding: clamp(58px, 8vw, 120px) clamp(8px, 7vw, 100px) 58px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); align-items: center; gap: 54px; }
 	.place { width: max-content; margin-bottom: 28px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-secondary); background: var(--surface); font-size: .76rem; font-weight: 600; }
 	.place i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }.place i.demo { background: var(--orange); }
@@ -416,4 +495,8 @@
 	.form-message{padding:12px 14px;display:flex;align-items:center;gap:9px;border:1px solid color-mix(in srgb,var(--green) 30%,var(--border));border-radius:14px;color:var(--text);background:color-mix(in srgb,var(--green) 10%,var(--surface));font-size:.82rem}.form-message svg{flex:none;color:var(--green)}
 	.form-message.error{border-color:color-mix(in srgb,var(--red) 35%,var(--border));background:color-mix(in srgb,var(--red) 10%,var(--surface))}.form-message.error svg{color:var(--red)}
 	.metrics small span{display:block;margin-top:4px;color:var(--text-tertiary)}
+	@media (prefers-reduced-motion: reduce) {
+		.loading-mark, .loading-track span { animation: none; }
+		.loading-track span { width: 100%; opacity: .55; }
+	}
 </style>

@@ -11,7 +11,7 @@ from alert_tracker import EvidenceUnchanged, progressive_predict
 from history_store import save_snapshot
 from monitoring_store import (
     WORKER_ID,
-    cancel_superseded_jobs,
+    cancel_jobs_outside_targets,
     claim_due_job,
     create_alert_level_event,
     ensure_monitoring_job,
@@ -30,19 +30,27 @@ from evidence_store import persist_and_link_evidence, records_from_prediction
 from outcome_store import collect_recent_outcomes
 from prediction_cache import MODEL_VERSION
 from validation_service import run_stored_validation
+from central_outlooks import central_target_dates
 
 POLL_SECONDS = max(5, int(os.getenv("WORKER_POLL_SECONDS", "30")))
 WORKER_CONCURRENCY = max(1, min(8, int(os.getenv("WORKER_CONCURRENCY", "3"))))
 
 
 def seed_central_jobs() -> None:
-    """Ensure one current target per active forecast cell, not per settlement."""
-    target = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    """Ensure two validated daily outlook targets per shared forecast cell.
+
+    Each target is an independent application of the validated daily binary
+    classifier to that calendar day's 72-hour input window. Day+2 is not
+    scheduled until the multi-horizon model completes evaluation.
+    """
+    today = datetime.now(timezone.utc).date()
+    targets = set(central_target_dates(today))
     cells = list_active_forecast_cells()
     locations = [(float(cell["lat"]), float(cell["lon"]), cell["name"]) for cell in cells]
     for lat, lon, _ in locations:
-        cancel_superseded_jobs(lat, lon, target)
-        ensure_monitoring_job(lat, lon, target)
+        cancel_jobs_outside_targets(lat, lon, targets)
+        for target in sorted(targets):
+            ensure_monitoring_job(lat, lon, target)
 
 
 async def process_job(job: dict) -> None:
@@ -75,7 +83,6 @@ async def process_job(job: dict) -> None:
         "input_completeness": result["data_composition"]["input_completeness"],
         "metadata": {
             "worker_id": WORKER_ID, "monitoring_job_id": str(job["id"]),
-            "confidence": result["data_composition"]["confidence_pct"],
             "trend": result["trend"], "revision": result["update_count"],
             "surface_data": result["surface_data"],
             "input_quality": result["input_quality"],

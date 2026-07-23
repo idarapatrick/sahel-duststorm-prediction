@@ -263,7 +263,11 @@ def query_latest_environmental_evidence(lat: float, lon: float) -> dict[str, Any
 
 
 def query_latest_prediction_bundle(
-    lat: float, lon: float, target_date: date
+    lat: float,
+    lon: float,
+    target_date: date,
+    *,
+    allow_recent_fallback: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Read the central snapshot and its evidence over one database connection.
 
@@ -272,7 +276,7 @@ def query_latest_prediction_bundle(
     """
     if not _using_postgres():
         snapshots = query_snapshots(lat, lon, target_date)
-        if not snapshots:
+        if not snapshots and allow_recent_fallback:
             snapshots = query_recent_snapshots(lat, lon, 1)
         return (snapshots[0] if snapshots else None), None
 
@@ -296,7 +300,7 @@ def query_latest_prediction_bundle(
         snapshot_row = connection.execute(
             snapshot_sql, (target_date, *bounds)
         ).fetchone()
-        if not snapshot_row:
+        if not snapshot_row and allow_recent_fallback:
             snapshot_row = connection.execute(recent_sql, bounds).fetchone()
         evidence_row = connection.execute(evidence_sql, bounds).fetchone()
 
@@ -308,6 +312,43 @@ def query_latest_prediction_bundle(
         if isinstance(evidence.get("raw_payload"), str):
             evidence["raw_payload"] = json.loads(evidence["raw_payload"])
     return snapshot, evidence
+
+
+def query_latest_outlooks(
+    lat: float, lon: float, target_dates: list[date]
+) -> list[dict[str, Any]]:
+    """Return at most one central revision for each requested calendar day."""
+    if not target_dates:
+        return []
+    if not _using_postgres():
+        results = []
+        for target_date in target_dates:
+            rows = query_snapshots(lat, lon, target_date)
+            if rows:
+                results.append(rows[0])
+        return results
+    with _postgres_connection() as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT ON (target_date) *
+               FROM prediction_snapshots
+               WHERE target_date = ANY(%s)
+                 AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+               ORDER BY target_date,recorded_at DESC""",
+            (
+                target_dates,
+                lat - 0.05,
+                lat + 0.05,
+                lon - 0.05,
+                lon + 0.05,
+            ),
+        ).fetchall()
+    normalized = [_normalise_row(row) for row in rows]
+    by_date = {item["target_date"]: item for item in normalized}
+    return [
+        by_date[target.isoformat()]
+        for target in target_dates
+        if target.isoformat() in by_date
+    ]
 
 
 def load_progressive_state(tracking_key: str) -> dict[str, Any] | None:

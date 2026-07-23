@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import { ArrowLeft, ArrowRight, Check, LocateFixed, MessageSquare, Phone, ShieldCheck, X } from 'lucide-svelte';
+	import { ArrowLeft, ArrowRight, Check, LocateFixed, MessageSquare, Phone, Search, ShieldCheck, X } from 'lucide-svelte';
 	import { createFirebaseSession, getNearestCoveredLocation, requestOtp, verifyOtp } from '$lib/api';
 	import { firebaseAuthEnabled, finishFirebasePhoneVerification, legacyPhoneAuthEnabled, startFirebasePhoneVerification } from '$lib/firebase';
 	import type { ConfirmationResult } from 'firebase/auth';
@@ -11,7 +11,9 @@
 	export let locations: Location[] = [DEFAULT_LOCATION];
 	export let initialLocation: Location = locations[0] || DEFAULT_LOCATION;
 	export let authOnly = false;
-	const dispatch = createEventDispatcher<{ complete: { location: Location; phoneUid?: string }; close: void }>();
+	export let coverageLoading = false;
+	export let coverageError = '';
+	const dispatch = createEventDispatcher<{ complete: { location: Location; phoneUid?: string }; close: void; retryCoverage: void }>();
 	let step: 'location' | 'phone-choice' | 'phone' | 'otp' = authOnly ? 'phone-choice' : 'location';
 	let selected = initialLocation;
 	let purpose: 'signup' | 'login' = 'signup';
@@ -21,7 +23,14 @@
 	let firebaseConfirmation: ConfirmationResult | null = null;
 	let busy = false;
 	let message = '';
+	let locationQuery = '';
 	$: phoneValid = /^\+[1-9][0-9]{9,14}$/.test(phone.trim());
+	$: filteredLocations = locations.filter((location) =>
+		`${location.name} ${location.country}`.toLowerCase().includes(locationQuery.trim().toLowerCase())
+	);
+	$: if (!locations.some((location) => location.name === selected.name && location.country === selected.country) && locations.length) {
+		selected = locations[0];
+	}
 
 	function chooseLocation() { step = 'phone-choice'; message = ''; }
 	function finish(phoneUid?: string) { dispatch('complete', { location: selected, phoneUid }); }
@@ -75,10 +84,28 @@
 			<p class="step">Step 1 of 2</p><h1 id="onboarding-title">Choose your forecast location</h1>
 			<p class="intro">Choose a monitored city, town or rural community. Provisional areas are available while local performance checks continue.</p>
 			<button class="locate" disabled={busy} on:click={useMyLocation}><LocateFixed size={19}/>{busy ? 'Checking location…' : 'Use my current location'}</button>
-			<label for="covered-location">Monitored communities</label>
-			<select id="covered-location" bind:value={selected}>{#each locations as location}<option value={location}>{location.name}, {location.country}{location.coverageStatus === 'provisional' ? ' (checks continuing)' : ''}</option>{/each}</select>
+			<label for="covered-location-search">Monitored communities</label>
+			{#if coverageLoading}
+				<div class="coverage-state" role="status"><span class="spinner"></span><div><strong>Loading covered communities</strong><small>SahelWatch is retrieving the current location catalogue.</small></div></div>
+			{:else if coverageError}
+				<div class="coverage-state error" role="alert"><div><strong>Locations could not be loaded</strong><small>{coverageError}</small><button type="button" on:click={() => dispatch('retryCoverage')}>Try again</button></div></div>
+			{:else}
+				<div class="location-picker">
+					<div class="location-search"><Search size={18}/><input id="covered-location-search" bind:value={locationQuery} placeholder="Search a city, town or village" autocomplete="off"/></div>
+					<div class="location-list" role="listbox" aria-label="Covered communities">
+						{#each filteredLocations as location}
+							<button type="button" class:selected={selected.name === location.name && selected.country === location.country} role="option" aria-selected={selected.name === location.name && selected.country === location.country} on:click={() => selected = location}>
+								<span><strong>{location.name}</strong><small>{location.country}{location.placeType ? ` · ${location.placeType}` : ''}</small></span>
+								{#if selected.name === location.name && selected.country === location.country}<Check size={18}/>{/if}
+							</button>
+						{:else}
+							<p>No covered community matches “{locationQuery}”.</p>
+						{/each}
+					</div>
+				</div>
+			{/if}
 			{#if message}<p class="message" role="status">{message}</p>{/if}
-			<button class="primary" on:click={chooseLocation}>Continue with {selected.name}<ArrowRight size={18}/></button>
+			<button class="primary" disabled={coverageLoading || Boolean(coverageError) || !locations.length} on:click={chooseLocation}>Continue with {selected.name}<ArrowRight size={18}/></button>
 		{:else if step === 'phone-choice'}
 			<p class="step">{authOnly ? 'Account' : 'Step 2 of 2 · Optional'}</p><h1 id="onboarding-title">Receive alerts beyond the app</h1>
 			<p class="intro">Link a phone number to receive high-risk dust alerts by SMS. You can use all in-app forecasts without linking a number.</p>
@@ -111,8 +138,10 @@
 	.sheet{position:relative;width:min(520px,100%);max-height:calc(100dvh - 32px);overflow:auto;padding:clamp(26px,5vw,46px);border:1px solid var(--border);border-radius:36px;background:var(--bg-elevated);box-shadow:0 30px 100px rgba(0,0,0,.2)}
 	.brand{display:flex;align-items:center;gap:9px;font-weight:760}.brand span{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;color:white;background:var(--blue)}
 	.step{margin:38px 0 8px;color:var(--blue);font-size:.72rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em}h1{margin:0;font-size:clamp(2rem,7vw,3.1rem);line-height:1.02;letter-spacing:-.055em}.intro{margin:16px 0 26px;color:var(--text-secondary);line-height:1.6}
-	label{display:block;margin:20px 0 8px;font-size:.78rem;font-weight:700}select,input{width:100%;min-height:52px;padding:0 15px;border:1px solid var(--border);border-radius:16px;color:var(--text);background:var(--surface-solid);font-size:1rem}.otp{font-size:1.5rem;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums}
+	label{display:block;margin:20px 0 8px;font-size:.78rem;font-weight:700}input{width:100%;min-height:52px;padding:0 15px;border:1px solid var(--border);border-radius:16px;color:var(--text);background:var(--surface-solid);font-size:1rem}.otp{font-size:1.5rem;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums}
 	.helper{display:block;margin:7px 3px 0;color:var(--text-tertiary);font-size:.72rem;line-height:1.45}
+	.coverage-state{min-height:82px;padding:16px;display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:16px;background:var(--surface-muted)}.coverage-state strong,.coverage-state small{display:block}.coverage-state small{margin-top:4px;color:var(--text-secondary);line-height:1.4}.coverage-state.error{border-color:color-mix(in srgb,var(--red) 35%,var(--border))}.coverage-state.error button{min-height:40px;margin-top:10px;padding:0 14px;color:white;background:var(--blue)}.spinner{width:22px;height:22px;flex:none;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+	.location-picker{border:1px solid var(--border);border-radius:18px;background:var(--surface-solid);overflow:hidden}.location-search{height:52px;padding:0 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--border);color:var(--text-tertiary)}.location-search input{min-height:0;padding:0;border:0;border-radius:0;outline:0;background:transparent}.location-list{max-height:min(280px,35vh);padding:7px;overflow-y:auto;overscroll-behavior:contain}.location-list button{width:100%;min-height:54px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;text-align:left;background:transparent}.location-list button.selected{color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,transparent)}.location-list strong,.location-list small{display:block}.location-list small{margin-top:3px;color:var(--text-secondary);font-size:.72rem}.location-list p{padding:14px;color:var(--text-secondary);font-size:.82rem}
 	button{min-height:48px;border:0;border-radius:16px;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.primary,.secondary,.locate,.text{width:100%;margin-top:12px}.primary{display:flex;align-items:center;justify-content:center;gap:8px;color:white;background:var(--blue)}.secondary,.locate{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--text);background:var(--surface-muted)}.locate{margin-bottom:18px}.text{color:var(--text-secondary);background:transparent}.back,.close{position:absolute;top:24px;width:44px;background:var(--surface-muted)}.back{right:24px}.close{right:24px}.benefit{padding:16px;display:flex;gap:12px;border-radius:18px;background:var(--surface-muted)}.benefit p{margin:5px 0 0;color:var(--text-secondary);font-size:.8rem;line-height:1.45}.message{margin:12px 0 0;color:var(--text-secondary);font-size:.82rem}.error{color:var(--red)}.privacy{margin:24px 0 0;color:var(--text-tertiary);font-size:.72rem;line-height:1.5}.privacy a{color:var(--blue)}
 	@media(prefers-reduced-motion:no-preference){.sheet{animation:enter .25s ease-out}@keyframes enter{from{opacity:0;transform:translateY(14px) scale(.98)}}}
 </style>

@@ -24,8 +24,14 @@ def tracking_key(lat: float, lon: float, target_date: date | str) -> str:
 
 
 def monitoring_window(target_date: date) -> tuple[datetime, datetime]:
+    """Return the collection period for one daily target.
+
+    The model input ends at target-day noon, but the central current-day
+    outlook remains eligible for evidence revisions until the calendar day
+    ends.
+    """
     target = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
-    return target - timedelta(hours=60), target + timedelta(hours=12)
+    return target - timedelta(hours=60), target + timedelta(hours=24)
 
 
 def ensure_monitoring_job(
@@ -76,6 +82,33 @@ def cancel_superseded_jobs(lat: float, lon: float, target_date: date) -> int:
                  AND target_date <> %s
                  AND status IN ('pending','running','failed')""",
             (lat - 0.001, lat + 0.001, lon - 0.001, lon + 0.001, target_date),
+        )
+        return result.rowcount
+
+
+def cancel_jobs_outside_targets(
+    lat: float, lon: float, target_dates: set[date]
+) -> int:
+    """Cancel active jobs except the current and supported future targets."""
+    if not _using_postgres():
+        return 0
+    with _postgres_connection() as connection:
+        result = connection.execute(
+            """UPDATE monitoring_jobs
+               SET status='cancelled', completed_at=now(), locked_at=NULL,
+                   locked_by=NULL,
+                   last_error='Outside the current central outlook range',
+                   updated_at=now()
+               WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+                 AND NOT (target_date = ANY(%s))
+                 AND status IN ('pending','running','failed')""",
+            (
+                lat - 0.001,
+                lat + 0.001,
+                lon - 0.001,
+                lon + 0.001,
+                list(target_dates),
+            ),
         )
         return result.rowcount
 

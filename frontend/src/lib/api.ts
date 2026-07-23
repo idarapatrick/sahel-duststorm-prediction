@@ -1,15 +1,34 @@
 import { env } from '$env/dynamic/public';
 import type { ActiveAlert, AuthState, DailyHorizonResponse, HistoricalSnapshot, Location, Prediction } from './types';
 
-const base = (env.PUBLIC_API_BASE_URL || 'https://saheldust-backend.onrender.com').replace(/\/$/, '');
+// Vite relays development requests through the local server so localhost can
+// exercise the deployed API before a backend CORS change has been redeployed.
+const defaultBase = import.meta.env.DEV ? '/backend' : 'https://saheldust-backend.onrender.com';
+const base = (env.PUBLIC_API_BASE_URL || defaultBase).replace(/\/$/, '');
 const timeoutMs = 75_000;
+
+export class ApiRequestError extends Error {
+	constructor(message: string, public status: number) {
+		super(message);
+		this.name = 'ApiRequestError';
+	}
+}
 
 async function getJson(path: string, requestTimeoutMs = timeoutMs) {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 	try {
 		const response = await fetch(`${base}${path}`, { signal: controller.signal, credentials: 'include' });
-		if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail || `Request failed (${response.status})`);
+		if (!response.ok) {
+			const payload = await response.json().catch(() => null);
+			const detail = payload?.detail;
+			const message = typeof detail === 'string'
+				? detail
+				: typeof detail?.message === 'string'
+					? detail.message
+					: `Request failed (${response.status})`;
+			throw new ApiRequestError(message, response.status);
+		}
 		return await response.json();
 	} finally { clearTimeout(timeout); }
 }
@@ -27,7 +46,7 @@ function forecastCoordinates(location: Location) {
 }
 
 export async function getCoveredLocations(): Promise<Location[]> {
-	const data = await getJson('/api/v1/coverage/places?limit=500');
+	const data = await getJson('/api/v1/coverage/places?limit=500', 5_000);
 	return Array.isArray(data.places) ? data.places.map(coveredPlace) : [];
 }
 
@@ -107,7 +126,7 @@ export async function getNotifications() {
 
 export async function getLatestPrediction(location: Location): Promise<Prediction> {
 	const point = forecastCoordinates(location);
-	const d = await getJson(`/api/v1/predictions/latest?lat=${point.lat}&lon=${point.lon}`, 3_000);
+	const d = await getJson(`/api/v1/predictions/latest?lat=${point.lat}&lon=${point.lon}`, 9_500);
 	const x = d.prediction;
 	const c = d.current_conditions;
 	const fieldEvidence = Array.isArray(d.environmental_evidence) ? d.environmental_evidence.map((item: any) => ({
@@ -137,11 +156,18 @@ export async function getLatestPrediction(location: Location): Promise<Predictio
 		inputQuality: d.evidence?.raw_payload?.input_quality ? { degraded: d.evidence.raw_payload.input_quality.degraded, warning: d.evidence.raw_payload.input_quality.warning, fields: d.evidence.raw_payload.input_quality } : undefined,
 		freshness: d.freshness ? { recordedAt: d.freshness.recorded_at, ageMinutes: d.freshness.age_minutes, stale: d.freshness.stale, source: d.freshness.source } : undefined,
 		environmentalEvidence: fieldEvidence,
-		evidenceSummary: {
-			observedFraction: Number(x.observed_fraction ?? 0),
-			forecastFraction: Number(x.forecast_fraction ?? 0),
-			inputCompleteness: Number(x.input_completeness ?? 0)
-		} };
+		evidenceSummary: x.input_completeness == null ? undefined : {
+			observedFraction: Number(x.observed_fraction),
+			forecastFraction: Number(x.forecast_fraction),
+			inputCompleteness: Number(x.input_completeness)
+		},
+		outlooks: Array.isArray(d.outlooks) ? d.outlooks.map((item: any) => ({
+			targetDate: item.target_date,
+			probability: Number(item.probability),
+			riskLevel: item.alert_level,
+			recordedAt: item.recorded_at,
+			inputCompleteness: item.input_completeness == null ? undefined : Number(item.input_completeness)
+		})) : [] };
 }
 
 export async function getCurrentConditions(location: Location) {

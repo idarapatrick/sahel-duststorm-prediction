@@ -19,7 +19,12 @@ export interface Prediction {
 	freshness?: { recordedAt: string; ageMinutes: number; stale: boolean; source: string };
 	environmentalEvidence?: EnvironmentalEvidence[];
 	evidenceSummary?: { observedFraction: number; forecastFraction: number; inputCompleteness: number };
+	outlooks?: CentralOutlook[];
 	available?: boolean;
+}
+export interface CentralOutlook {
+	targetDate: string; probability: number; riskLevel: RiskLevel; recordedAt: string;
+	inputCompleteness?: number;
 }
 export interface EnvironmentalEvidence {
 	variableName: string; value: number | null; unit?: string; provider: string;

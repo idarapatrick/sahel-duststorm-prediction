@@ -15,7 +15,7 @@ load_dotenv()
 
 from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_for_date, get_location_name
 from alert_tracker import get_all_tracked, clear_expired
-from history_store import RETENTION_DAYS, database_status, query_latest_prediction_bundle, query_recent_snapshots, query_snapshots, save_snapshot
+from history_store import RETENTION_DAYS, database_status, query_latest_outlooks, query_latest_prediction_bundle, query_recent_snapshots, query_snapshots, save_snapshot
 from evidence_store import query_snapshot_evidence
 from monitoring_store import prediction_schedule
 from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
@@ -25,6 +25,7 @@ from observability import configure_logging, log_event
 from coverage_store import coverage_status, list_covered_places, nearest_covered_place
 from firebase_auth import create_firebase_session, delete_firebase_account, firebase_configured
 from sms_provider import alert_provider_name, twilio_configured
+from central_outlooks import central_target_dates
 from model import (
     AccountDeletionConfirmation,
     AccountDeletionRequest,
@@ -42,7 +43,14 @@ from model import (
 HF_SPACE_URL = os.getenv(
     "HF_SPACE_URL", "https://mavencodes-saheldust-api.hf.space/predict"
 )
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+# Local development remains browser-accessible even when a deployment-specific
+# CORS_ORIGINS value contains only the production Vercel address.
+LOCAL_DEVELOPMENT_ORIGIN = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 # Intentionally unset in deployment until final model evaluation and ONNX export.
 MULTI_HORIZON_MODEL_URL = os.getenv("MULTI_HORIZON_MODEL_URL")
 
@@ -52,6 +60,7 @@ logger = configure_logging()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=LOCAL_DEVELOPMENT_ORIGIN,
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
@@ -364,12 +373,29 @@ async def active_alerts():
 
 @app.get("/api/v1/predictions/latest")
 async def latest_prediction(lat: float, lon: float):
-    """Read the latest centrally stored result without triggering inference."""
+    """Read today's result and the validated centrally stored daily outlooks.
+
+    This endpoint is strictly read-only. It never substitutes a future or
+    historical result for today's outlook and never invokes model inference.
+    """
     validate_sahel_point(lat, lon)
-    central_target = (datetime.now(timezone.utc) + timedelta(days=1)).date()
-    snapshot, evidence = query_latest_prediction_bundle(lat, lon, central_target)
+    central_target = datetime.now(timezone.utc).date()
+    supported_targets = central_target_dates(central_target)
+    snapshot, evidence = query_latest_prediction_bundle(
+        lat, lon, central_target, allow_recent_fallback=False
+    )
     if not snapshot:
-        raise HTTPException(404, "No central prediction has been recorded for this location yet")
+        schedule = prediction_schedule(lat, lon, central_target)
+        raise HTTPException(
+            404,
+            detail={
+                "message": "Today's central prediction is still being prepared",
+                "target_date": central_target.isoformat(),
+                "worker_status": schedule["status"],
+                "next_update_at": schedule["next_update_at"],
+            },
+        )
+    outlooks = query_latest_outlooks(lat, lon, supported_targets)
     recorded_at = datetime.fromisoformat(snapshot["recorded_at"].replace("Z", "+00:00"))
     age_minutes = max(
         0, round((datetime.now(timezone.utc) - recorded_at).total_seconds() / 60, 1)
@@ -401,6 +427,7 @@ async def latest_prediction(lat: float, lon: float):
     schedule = prediction_schedule(lat, lon, central_target)
     return {
         "prediction": snapshot,
+        "outlooks": outlooks,
         "surface_data": surface,
         "current_conditions": conditions,
         "freshness": {
