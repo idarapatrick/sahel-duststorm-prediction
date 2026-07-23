@@ -16,6 +16,8 @@ load_dotenv()
 from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_for_date, get_location_name
 from alert_tracker import get_all_tracked, clear_expired
 from history_store import RETENTION_DAYS, database_status, query_latest_prediction_bundle, query_recent_snapshots, query_snapshots, save_snapshot
+from evidence_store import query_snapshot_evidence
+from monitoring_store import prediction_schedule
 from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
 from rate_limit import RateLimitExceeded, enforce_rate_limit
@@ -199,11 +201,16 @@ async def auth_delete_firebase_account(
         user = require_session(sahelwatch_session)
         if user.get("auth_provider") != "firebase":
             raise AuthError(409, "This account still uses the previous verification service")
-        delete_firebase_account(user, payload.id_token)
+        scheduled_for = delete_firebase_account(user, payload.id_token)
     except AuthError as exc:
         raise _auth_error(exc) from exc
     response.delete_cookie("sahelwatch_session", path="/", secure=True, samesite="none")
-    return {"deleted": True}
+    return {
+        "deleted": False,
+        "status": "pending_deletion",
+        "scheduled_for": scheduled_for.isoformat(),
+        "retention_days": 7,
+    }
 
 
 @app.post("/api/v1/auth/request-otp")
@@ -390,6 +397,8 @@ async def latest_prediction(lat: float, lon: float):
             "vegetation_water_content": evidence.get("vegetation_water_content"),
             "aod": evidence.get("aod"),
         }
+    field_evidence = query_snapshot_evidence(snapshot["id"])
+    schedule = prediction_schedule(lat, lon, central_target)
     return {
         "prediction": snapshot,
         "surface_data": surface,
@@ -401,8 +410,12 @@ async def latest_prediction(lat: float, lon: float):
             "source": "central-hourly-worker",
             "target_date": snapshot["target_date"],
             "current_central_target": central_target.isoformat(),
+            "next_update_at": schedule["next_update_at"],
+            "updating": schedule["updating"],
+            "worker_status": schedule["status"],
         },
         "evidence": evidence,
+        "environmental_evidence": field_evidence,
     }
 
 

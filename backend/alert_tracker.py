@@ -1,12 +1,8 @@
-"""
-SahelDust Progressive Alert System
+"""Create auditable revisions of centrally monitored dust predictions.
 
-Tracks predictions over time for monitored locations.
-Each prediction update replaces forecast data with real observations
-from Open-Meteo, progressively improving confidence.
-
-Alert levels escalate or de-escalate based on how the probability
-changes across consecutive updates.
+Each run uses the deployed model unchanged, preserves the new probability even
+when it decreases, and reports the actual mixture of forecasts, analyses,
+delayed observations, fallbacks, and missing values.
 """
 
 import json
@@ -24,6 +20,12 @@ from history_store import (
     query_active_progressive_states,
     save_progressive_state,
 )
+from evidence_store import (
+    evidence_fingerprint,
+    evidence_summary,
+    latest_fingerprint,
+    records_from_prediction,
+)
 
 HF_SPACE_URL = os.getenv(
     "HF_SPACE_URL", "https://mavencodes-saheldust-api.hf.space/predict"
@@ -35,6 +37,11 @@ ALERT_LEVELS = {
     "warning": {"min_prob": 0.5, "max_prob": 0.7, "label": "Dust event likely"},
     "alert": {"min_prob": 0.7, "max_prob": 1.0, "label": "Dust event imminent"},
 }
+_MODEL_CLIENT: httpx.AsyncClient | None = None
+
+
+class EvidenceUnchanged(RuntimeError):
+    """Signal that a scheduled run has no new model input information."""
 
 def get_alert_level(probability: float) -> dict:
     for level_name, thresholds in ALERT_LEVELS.items():
@@ -108,33 +115,24 @@ def _explain_prediction(probability: float, conditions: dict) -> str:
 
 
 async def run_prediction(atmospheric: list, surface: list) -> dict:
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            HF_SPACE_URL,
-            json={"atmospheric": atmospheric, "surface": surface},
+    """Call the deployed model through one reusable worker HTTP connection pool."""
+    global _MODEL_CLIENT
+    if _MODEL_CLIENT is None or _MODEL_CLIENT.is_closed:
+        _MODEL_CLIENT = httpx.AsyncClient(
+            timeout=30,
+            limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
         )
+    response = await _MODEL_CLIENT.post(
+        HF_SPACE_URL,
+        json={"atmospheric": atmospheric, "surface": surface},
+    )
     if response.status_code != 200:
         raise RuntimeError(f"Model API returned {response.status_code}")
     return response.json()
 
 
 async def progressive_predict(lat: float, lon: float, target_date: datetime) -> dict:
-    """
-    Make a prediction for a target date using the latest available data.
-
-    This is the core of the progressive system. Each time it runs:
-    1. Fetches the 72-hour atmospheric window from Open-Meteo
-       (Open-Meteo automatically uses real observations for past hours
-        and forecast data for future hours)
-    2. Fetches the latest SMAP and MODIS data from GEE
-    3. Runs the prediction through the model
-    4. Compares against previous predictions for the same location+date
-    5. Updates the alert level based on the probability trajectory
-
-    The atmospheric window covers T-60 to T+12 relative to target midnight.
-    As time passes, more of this window transitions from forecast to
-    real observations, improving prediction confidence.
-    """
+    """Run one revision for a target day using the latest eligible evidence."""
     loop = asyncio.get_event_loop()
     now = datetime.now(timezone.utc)
     target_key = _tracking_key(lat, lon, target_date.strftime("%Y-%m-%d"))
@@ -144,19 +142,6 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
     target_time = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
     if target_time.tzinfo is None:
         target_time = target_time.replace(tzinfo=timezone.utc)
-    window_start = target_time - timedelta(hours=60)
-    window_end = target_time + timedelta(hours=12)
-
-    if now < window_start:
-        hours_real = 0
-        hours_forecast = 72
-    elif now > window_end:
-        hours_real = 72
-        hours_forecast = 0
-    else:
-        hours_real = max(0, int((now - window_start).total_seconds() / 3600))
-        hours_forecast = 72 - hours_real
-
     atmospheric, surface, provenance, raw_data = await build_prediction_inputs(
         lat, lon, target_date, loop
     )
@@ -167,17 +152,31 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
     soil_source = provenance["soil_moisture"]["source"]
     conditions = _current_conditions(raw_data, now, surface)
 
+    provisional_result = {
+        "surface_data": {
+            "soil_moisture": round(sm, 4),
+            "vegetation_water_content": round(vwc, 4),
+            "prev_day_aod": round(prev_aod, 4),
+        },
+        "evidence_provenance": provenance,
+    }
+    evidence_records = records_from_prediction(provisional_result)
+    fingerprint = evidence_fingerprint(evidence_records)
+    if latest_fingerprint(lat, lon, target_date.strftime("%Y-%m-%d")) == fingerprint:
+        raise EvidenceUnchanged(
+            "The latest provider responses contain the same prediction evidence"
+        )
+    composition = evidence_summary(evidence_records)
     model_result = await run_prediction(atmospheric, surface)
     current_prob = model_result["probability"]
     current_alert = get_alert_level(current_prob)
-
     update_record = {
         "timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "probability": current_prob,
         "alert_level": current_alert["level"],
-        "hours_real_data": hours_real,
-        "hours_forecast_data": hours_forecast,
-        "confidence": round(hours_real / 72 * 100, 1),
+        "observed_fraction": composition["observed_fraction"],
+        "forecast_fraction": composition["forecast_fraction"],
+        "input_completeness": composition["input_completeness"],
         "soil_moisture": round(sm, 4),
         "vegetation_water_content": round(vwc, 4),
         "prev_day_aod": round(prev_aod, 4),
@@ -229,15 +228,13 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
         alert_message = (
             f"WATCH: Possible dust activity at {location_name} on "
             f"{target_date.strftime('%B %d')}. "
-            f"Prediction based on {hours_real}/72 hours of real data "
-            f"({update_record['confidence']}% confidence). Monitor for updates."
+            "Conditions should be watched for changes."
         )
     elif current_alert["level"] == "warning":
         alert_message = (
             f"WARNING: Dust event likely at {location_name} on "
             f"{target_date.strftime('%B %d')}. "
             f"Probability: {current_prob:.0%}. "
-            f"Based on {hours_real}/72 hours of real observations. "
             f"Begin precautionary measures."
         )
     else:
@@ -245,7 +242,6 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
             f"ALERT: Dust event expected at {location_name} on "
             f"{target_date.strftime('%B %d')}. "
             f"Probability: {current_prob:.0%}. "
-            f"Based on {hours_real}/72 hours of confirmed observations. "
             f"Seek shelter. Cover water sources. Keep children indoors."
         )
 
@@ -255,7 +251,7 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
             alert_message = (
                 f"UPDATE: Previous {prev_level.upper()} for {location_name} "
                 f"has been downgraded to {current_alert['level'].upper()}. "
-                f"Conditions have changed. Real observations show reduced dust risk. "
+                f"New environmental information indicates reduced dust risk. "
                 f"Probability dropped from {previous_updates[-1]['probability']:.0%} "
                 f"to {current_prob:.0%}."
             )
@@ -274,12 +270,10 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
         "dust_event": model_result["dust_event"],
         "risk_level": model_result["risk_level"],
         "data_composition": {
-            "hours_real_observations": hours_real,
-            "hours_forecast_data": hours_forecast,
-            "confidence_pct": round(hours_real / 72 * 100, 1),
+            **composition,
             "description": (
-                f"{hours_real} of 72 atmospheric hours use real observations, "
-                f"{hours_forecast} use forecast data"
+                "This revision uses forecast, analysis, and available "
+                "environmental readings as identified in its evidence record."
             ),
         },
         "trend": trend,
@@ -290,6 +284,8 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
             "vegetation_water_content": round(vwc, 4),
             "prev_day_aod": round(prev_aod, 4),
         },
+        "evidence_provenance": provenance,
+        "evidence_fingerprint": fingerprint,
         "current_conditions": conditions,
         "explanation": _explain_prediction(current_prob, conditions),
         "explanation_method": "rule-based summary of model inputs; not causal feature attribution",

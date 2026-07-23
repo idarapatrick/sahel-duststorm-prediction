@@ -21,7 +21,7 @@ SahelWatch aims to provide a practical screening and monitoring system that:
 
 1. estimates the likelihood of dust-producing conditions for a selected Sahel location;
 2. explains the result using wind, temperature, soil moisture, and aerosol optical depth (AOD);
-3. updates predictions as newer observations replace forecast values;
+3. updates predictions when meaningfully newer forecasts, analyses, or observations become available;
 4. records immutable prediction revisions for up to 90 days;
 5. creates alerts only when risk rises above clear conditions; and
 6. supports optional phone-linked accounts for future offline SMS delivery.
@@ -47,17 +47,19 @@ SahelWatch is an early-warning aid, not a replacement for an official warning is
 ### Backend and operations
 
 - FastAPI endpoints with coordinate validation and consistent error responses
-- Open-Meteo atmospheric forecast and observation retrieval
+- Open-Meteo atmospheric forecast and current weather-model retrieval
 - Google Earth Engine access for recent SMAP soil moisture and MODIS AOD
 - Remote model inference through the deployed model service
-- PostgreSQL prediction history and environmental evidence storage
+- Field-level PostgreSQL evidence provenance with measurement, availability, retrieval, forecast-target, quality, and fallback metadata
 - Request coalescing and short-lived PostgreSQL response caching for near-simultaneous requests
 - Autonomous reinforcement worker that monitors active forecast grid cells
 - PostgreSQL job claiming with `FOR UPDATE SKIP LOCKED`, safe for multiple workers
-- Immutable hourly prediction revisions shared by communities mapped to each cell
+- Immutable prediction revisions linked to their exact evidence, with identical-input runs suppressed
 - Alert upgrade and downgrade events through a transactional outbox
 - Separate alert-delivery worker with idempotency, retry, and dead-letter handling
 - Worker heartbeat, queue health, rate limiting, retention cleanup, and health reporting
+- Delayed MODIS outcome collection and leakage-safe validation against the model's AOD greater than 0.7 training label
+- Brier score, log loss, ROC-AUC, PR-AUC, calibration, alert metrics, failure slices, and simple baseline comparisons
 
 ## Prediction design
 
@@ -79,7 +81,7 @@ The result is translated into four operational levels:
 | 0.50 to below 0.70 | Warning | Dust-producing conditions are increasingly likely |
 | 0.70 and above | Alert | Highest operational risk level |
 
-The progressive pipeline accepts both increases and decreases. If new observations reduce the estimated risk, the new lower result is stored and the alert can be downgraded.
+The progressive pipeline accepts both increases and decreases. If newer environmental evidence reduces the estimated risk, the new lower result is stored and the alert can be downgraded. Forecast API values remain labelled as forecasts, CAMS values as analyses, and SMAP or MODIS values as delayed observations.
 
 ### Continuous reinforcement
 
@@ -87,8 +89,8 @@ The background worker creates monitoring jobs without waiting for users. For eac
 
 1. creates or finds the next target-day job;
 2. atomically claims the job from PostgreSQL;
-3. retrieves updated atmospheric and surface evidence;
-4. runs inference again;
+3. retrieves and fingerprints updated atmospheric and surface evidence;
+4. runs inference only when the evidence has meaningfully changed;
 5. stores a new immutable snapshot and its evidence;
 6. creates an outbox event only for a meaningful risk-level transition;
 7. schedules the next hourly evaluation; and

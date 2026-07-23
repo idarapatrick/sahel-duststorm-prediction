@@ -186,7 +186,8 @@ def session_user(token: str | None) -> dict[str, Any] | None:
             """SELECT i.phone_uid,i.firebase_uid,i.auth_provider,
                       i.preferred_lat,i.preferred_lon,i.preferred_location_name
                FROM user_sessions s JOIN alert_identities i USING(phone_uid)
-               WHERE s.token_hash=%s AND s.revoked_at IS NULL AND s.expires_at>now()""",
+               WHERE s.token_hash=%s AND s.revoked_at IS NULL AND s.expires_at>now()
+                 AND i.account_status='active'""",
             (_token_hash(token),),
         ).fetchone()
         if row:

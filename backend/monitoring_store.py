@@ -143,6 +143,30 @@ def monitoring_job_is_running(job_id: str) -> bool:
     return bool(row and row["status"] == "running")
 
 
+def prediction_schedule(lat: float, lon: float, target_date: date) -> dict[str, Any]:
+    """Return the next central update and whether a worker currently owns it."""
+    if not _using_postgres():
+        return {"status": "unavailable", "next_update_at": None, "updating": False}
+    with _postgres_connection() as connection:
+        row = connection.execute(
+            """SELECT status,next_run_at,locked_at,updated_at
+               FROM monitoring_jobs
+               WHERE target_date=%s
+                 AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+               ORDER BY updated_at DESC LIMIT 1""",
+            (target_date, lat - 0.001, lat + 0.001, lon - 0.001, lon + 0.001),
+        ).fetchone()
+    if not row:
+        return {"status": "not_scheduled", "next_update_at": None, "updating": False}
+    return {
+        "status": row["status"],
+        "next_update_at": (
+            row["next_run_at"].isoformat() if row.get("next_run_at") else None
+        ),
+        "updating": row["status"] == "running",
+    }
+
+
 def reschedule_job(job_id: str, snapshot_id: str, target_date: date) -> None:
     _, window_end = monitoring_window(target_date)
     now = datetime.now(timezone.utc)
@@ -191,7 +215,12 @@ def fail_job(job_id: str, error: Exception) -> None:
 
 
 def record_environmental_evidence(result: dict[str, Any]) -> None:
-    """Store the evidence used by a revision, without overwriting prior rows."""
+    """Populate the legacy wide evidence table for older API consumers.
+
+    New code uses ``environmental_evidence`` and ``prediction_evidence_links``.
+    The legacy row is conservatively marked as forecast because it combines
+    inputs of several kinds and must never imply that all values were observed.
+    """
     from psycopg.types.json import Jsonb
 
     conditions = result["current_conditions"]
@@ -209,7 +238,7 @@ def record_environmental_evidence(result: dict[str, Any]) -> None:
                 wind_direction_deg, temperature_c, dewpoint_c, surface_pressure_hpa,
                 precipitation_mm, soil_moisture, vegetation_water_content, aod,
                 raw_payload)
-               VALUES (%s,%s,'open-meteo+gee','observed',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               VALUES (%s,%s,'mixed-provider-inputs','forecast',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (location_id, observed_at, source, value_kind) DO NOTHING""",
             (
                 location["id"], observed_at, conditions.get("wind_speed_ms"),
@@ -229,8 +258,19 @@ def create_alert_level_event(
     result: dict[str, Any],
 ) -> str | None:
     current_level = result["alert_level"]
-    # Clear conditions remain available in history but never become an alert.
-    if current_level == "clear" or current_level == previous_level:
+    completeness = float(
+        result.get("data_composition", {}).get("input_completeness", 0)
+    )
+    location_name = str(result.get("location_name") or "").strip()
+    # Clear, incomplete, unknown, and duplicate conditions remain in history
+    # but never become outbound warning events.
+    if (
+        current_level == "clear"
+        or current_level == previous_level
+        or completeness < 0.8
+        or not location_name
+        or location_name.lower() == "unknown"
+    ):
         return None
     from psycopg.types.json import Jsonb
 

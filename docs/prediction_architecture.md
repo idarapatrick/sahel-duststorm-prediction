@@ -59,10 +59,45 @@ The backend adds target dates, risk levels, current Open-Meteo conditions and su
 
 ## Progressive refinement
 
-Progressive refinement remains separate from horizon prediction. It repeatedly evaluates the same target calendar day as more of its 72-hour atmospheric window changes from forecast data to observations. This produces a probability trajectory and data-completeness measure; it does not create new forecast horizons.
+Progressive refinement remains separate from horizon prediction. It evaluates the same target calendar day only when a provider returns meaningfully different evidence. Open-Meteo Forecast API values remain classified as forecasts even after their target timestamps pass. CAMS values are analyses, while SMAP and MODIS values are delayed observations. The system never infers observation status from the clock.
 
 Production reinforcement requires a scheduled server-side worker over persisted monitored locations. A browser timer is only a foreground convenience and cannot provide offline monitoring.
 
 ## Current dashboard conditions
 
-Open-Meteo supplies current temperature, humidity, apparent temperature, precipitation, pressure, wind and shallow soil moisture. MODIS/GEE supplies AOD and SMAP/GEE supplies enhanced surface inputs when available. Current weather values describe conditions at the selected location; they are not themselves per-feature causal attribution.
+Open-Meteo supplies the nearest current weather-model timestep for temperature, humidity, apparent temperature, precipitation, pressure, wind and shallow soil moisture. MODIS/GEE supplies delayed AOD and SMAP/GEE supplies delayed surface inputs when available. CAMS analysis supplies AOD when a valid recent MODIS value is absent. Current values describe conditions near the selected location; they are not per-feature causal attribution.
+
+## Evidence provenance and revision identity
+
+Every environmental field records its provider, semantic kind, measurement
+time, availability time, retrieval time, quality, fallback state and relevant
+forecast target. The exact 72-hour atmospheric series is retained with its
+field record. Each immutable prediction revision links to the evidence it used
+and stores an evidence fingerprint, revision reason, source fractions and input
+completeness.
+
+An hourly check does not automatically mean an hourly model call. When the
+fingerprint matches the latest stored revision, the worker reschedules the job
+without inference or a duplicate snapshot. New results are accepted whether
+their probability rises or falls.
+
+## Leakage-safe validation
+
+Historical replay follows one rule:
+
+```text
+evidence.available_at <= prediction.recorded_at
+```
+
+A satellite value measured on a target day but published later cannot be used
+to reconstruct an earlier prediction. Labelled revisions are evaluated with
+Brier score, log loss, ROC-AUC, PR-AUC, precision, recall, specificity,
+false-alert rate and calibration bins. Results are sliced by location, season,
+lead time and fallback use and compared with previous-day persistence, a
+transparent wind-dryness-AOD rule, and an AOD-only baseline.
+
+The worker checks recent issued target days for newly published MODIS outcomes.
+A masked or unavailable satellite value remains unlabeled. It is never stored
+as a no-event outcome. When new outcomes are stored, the worker records a new
+validation run using the AOD greater than 0.7 label documented by the training
+and AERONET evaluation notebooks.

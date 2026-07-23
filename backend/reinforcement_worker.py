@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from alert_tracker import progressive_predict
+from alert_tracker import EvidenceUnchanged, progressive_predict
 from history_store import save_snapshot
 from monitoring_store import (
     WORKER_ID,
@@ -25,6 +25,11 @@ from monitoring_store import (
 from alert_store import heartbeat
 from history_store import _postgres_connection
 from coverage_store import list_active_forecast_cells
+from firebase_auth import retry_one_firebase_cleanup
+from evidence_store import persist_and_link_evidence, records_from_prediction
+from outcome_store import collect_recent_outcomes
+from prediction_cache import MODEL_VERSION
+from validation_service import run_stored_validation
 
 POLL_SECONDS = max(5, int(os.getenv("WORKER_POLL_SECONDS", "30")))
 WORKER_CONCURRENCY = max(1, min(8, int(os.getenv("WORKER_CONCURRENCY", "3"))))
@@ -59,6 +64,15 @@ async def process_job(job: dict) -> None:
         "recorded_at": result["prediction_time"], "probability": result["probability"],
         "alert_level": result["alert_level"], "dust_event": result["dust_event"],
         "data_source": "background-progressive-open-meteo+gee",
+        "revision_reason": (
+            "initial_central_prediction"
+            if not updates[:-1]
+            else "new_environmental_evidence"
+        ),
+        "evidence_fingerprint": result["evidence_fingerprint"],
+        "observed_fraction": result["data_composition"]["observed_fraction"],
+        "forecast_fraction": result["data_composition"]["forecast_fraction"],
+        "input_completeness": result["data_composition"]["input_completeness"],
         "metadata": {
             "worker_id": WORKER_ID, "monitoring_job_id": str(job["id"]),
             "confidence": result["data_composition"]["confidence_pct"],
@@ -67,6 +81,15 @@ async def process_job(job: dict) -> None:
             "input_quality": result["input_quality"],
         },
     })
+    persist_and_link_evidence(
+        snapshot["id"],
+        result["lat"],
+        result["lon"],
+        result["location_name"],
+        records_from_prediction(result),
+    )
+    # Retain the legacy wide observation table while deployed clients migrate
+    # to field-level evidence returned by the latest-prediction endpoint.
     record_environmental_evidence(result)
     create_alert_level_event(job["tracking_key"], snapshot["id"], previous_level, result)
     reschedule_job(str(job["id"]), snapshot["id"], job["target_date"])
@@ -83,6 +106,16 @@ async def process_claimed_job(job: dict) -> None:
     """Finish one claimed job without terminating the long-running worker."""
     try:
         await process_job(job)
+    except EvidenceUnchanged:
+        snapshot_id = job.get("last_snapshot_id")
+        if snapshot_id:
+            reschedule_job(str(job["id"]), str(snapshot_id), job["target_date"])
+        else:
+            fail_job(str(job["id"]), EvidenceUnchanged("No prior revision is available"))
+        print(
+            f"Central prediction unchanged job={job['id']} target={job['target_date']}",
+            flush=True,
+        )
     except Exception as exc:
         fail_job(str(job["id"]), exc)
         print(f"Job {job['id']} failed: {type(exc).__name__}: {exc}", flush=True)
@@ -102,6 +135,21 @@ async def run_forever() -> None:
             if last_seed != today:
                 recover_stale_jobs()
                 seed_central_jobs()
+                outcome_result = await collect_recent_outcomes()
+                print(
+                    "MODIS outcome collection "
+                    f"checked={outcome_result['checked']} "
+                    f"stored={outcome_result['stored']}",
+                    flush=True,
+                )
+                if outcome_result["stored"]:
+                    validation = run_stored_validation(MODEL_VERSION)
+                    print(
+                        "Leakage-safe validation completed "
+                        f"run={validation['validation_run_id']} "
+                        f"cases={validation['overall']['count']}",
+                        flush=True,
+                    )
                 normalized = normalize_hourly_schedule()
                 if normalized:
                     print(
@@ -112,6 +160,9 @@ async def run_forever() -> None:
                     connection.execute("SELECT purge_sahelwatch_expired_data()")
                 last_seed = today
             heartbeat("reinforcement", WORKER_ID, "running")
+            # Account removal must not depend on the optional SMS worker being
+            # deployed. Process one due seven-day Firebase cleanup per cycle.
+            retry_one_firebase_cleanup()
             while len(active) < WORKER_CONCURRENCY:
                 job = claim_due_job()
                 if not job:

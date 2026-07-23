@@ -96,6 +96,7 @@ def heartbeat(worker_name: str, worker_id: str, status: str, metadata: dict | No
 
 
 def operational_status() -> dict[str, Any]:
+    """Summarize queues, workers, prediction freshness, and evidence quality."""
     with _postgres_connection() as connection:
         counts = connection.execute(
             """SELECT
@@ -109,6 +110,30 @@ def operational_status() -> dict[str, Any]:
                       count(*) filter(where status='dead_letter') dead_letter FROM outbox_events"""
         ).fetchone()
         beats = connection.execute("SELECT * FROM worker_heartbeats").fetchall()
+        prediction = connection.execute(
+            """SELECT max(recorded_at) last_model_call,
+                      count(*) filter(where recorded_at<now()-interval '90 minutes')
+                        stale_revision_count
+               FROM (
+                 SELECT distinct on (
+                   round(lat::numeric,3),round(lon::numeric,3),target_date
+                 ) lat,lon,target_date,recorded_at
+                 FROM prediction_snapshots
+                 ORDER BY round(lat::numeric,3),round(lon::numeric,3),
+                          target_date,recorded_at desc
+               ) latest"""
+        ).fetchone()
+        evidence = connection.execute(
+            """SELECT max(retrieved_at) last_evidence_collection,
+                      count(*) filter(
+                        where quality_status in ('missing','invalid','stale')
+                          and retrieved_at>=now()-interval '24 hours'
+                      ) degraded_values_24h,
+                      count(distinct provider) filter(
+                        where retrieved_at>=now()-interval '24 hours'
+                      ) active_providers_24h
+               FROM environmental_evidence"""
+        ).fetchone()
     now = datetime.now(timezone.utc)
     workers = {}
     for beat in beats:
@@ -118,7 +143,26 @@ def operational_status() -> dict[str, Any]:
             "heartbeat_at": beat["heartbeat_at"].isoformat(), "age_seconds": round(age),
         }
     return {
-        "monitoring_jobs": dict(counts), "outbox": dict(outbox), "workers": workers,
+        "monitoring_jobs": dict(counts),
+        "outbox": dict(outbox),
+        "workers": workers,
+        "predictions": {
+            "last_model_call": (
+                prediction["last_model_call"].isoformat()
+                if prediction["last_model_call"]
+                else None
+            ),
+            "stale_revision_count": prediction["stale_revision_count"],
+        },
+        "evidence": {
+            "last_collection": (
+                evidence["last_evidence_collection"].isoformat()
+                if evidence["last_evidence_collection"]
+                else None
+            ),
+            "degraded_values_24h": evidence["degraded_values_24h"],
+            "active_providers_24h": evidence["active_providers_24h"],
+        },
     }
 
 
@@ -144,8 +188,10 @@ def matching_recipients(event: dict[str, Any]) -> list[str]:
         return []
     with _postgres_connection() as connection:
         rows = connection.execute(
-            """SELECT phone_uid,threshold FROM alert_subscriptions
-               WHERE abs(lat-%s)<=0.05 AND abs(lon-%s)<=0.05""",
+            """SELECT s.phone_uid,s.threshold FROM alert_subscriptions s
+               JOIN alert_identities i ON i.phone_uid=s.phone_uid
+               WHERE i.account_status='active'
+                 AND abs(s.lat-%s)<=0.05 AND abs(s.lon-%s)<=0.05""",
             (payload["lat"], payload["lon"]),
         ).fetchall()
     return [row["phone_uid"] for row in rows if should_deliver(

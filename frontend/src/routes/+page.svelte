@@ -30,6 +30,7 @@
 	let PredictionMapComponent: any = null;
 	let linkedPhone = '';
 	let phoneMessage = '';
+	let phoneMessageType: 'success' | 'error' | 'info' = 'info';
 	let authState: AuthState = { authenticated: false };
 	let deviceId = '';
 	let showSplash = true;
@@ -53,14 +54,75 @@
 	$: riskTone = prediction.riskLevel;
 	$: horizon = dailyHorizons?.horizons.find((x) => x.horizon === selectedHorizon) || dailyHorizons?.horizons[0];
 	$: conditions = dailyHorizons?.conditions || progressive?.conditions || prediction.conditions;
+	$: aodEvidence = prediction.environmentalEvidence?.find((item) => item.variableName === 'previous_day_aod');
+	$: soilEvidence = prediction.environmentalEvidence?.find((item) => item.variableName === 'soil_moisture');
 	$: aodQuality = prediction.inputQuality?.fields?.previous_day_aod;
-	$: aodAvailable = aodQuality?.available === true || (!aodQuality && conditions?.aod != null && conditions.aod > 0);
-	$: aodSource = aodQuality?.source;
+	$: aodAvailable = aodEvidence
+		? aodEvidence.qualityStatus === 'valid' && aodEvidence.value != null
+		: aodQuality?.available === true;
+	$: aodSource = aodEvidence?.provider || aodQuality?.source;
 	$: aodDescription = aodSource === 'modis'
-		? 'Latest available satellite dust reading'
+		? 'Latest available satellite reading'
 		: aodSource === 'cams-global'
-			? 'Current atmospheric dust analysis'
-			: 'Latest available dust reading';
+			? 'Latest global atmospheric analysis'
+			: 'Latest available particle reading';
+	$: soilMoistureValue = conditions?.soilMoisture ?? progressive?.soilMoisture;
+	$: aodValue = conditions?.aod ?? progressive?.aod;
+	$: qualityFields = prediction.inputQuality?.fields;
+	$: confirmedMissingReadings = prediction.environmentalEvidence?.length
+		? [
+			['soil_moisture', 'soil moisture'],
+			['vegetation_water_content', 'vegetation water content'],
+			['previous_day_aod', 'AOD particle reading']
+		].filter(([key]) => prediction.environmentalEvidence?.some(
+			(item) => item.variableName === key && ['missing', 'invalid', 'stale'].includes(item.qualityStatus)
+		)).map(([, label]) => label)
+		: qualityFields
+			? [
+				['soil_moisture', 'soil moisture'],
+				['vegetation_water_content', 'vegetation water content'],
+				['previous_day_aod', 'AOD particle reading']
+			].filter(([key]) => qualityFields?.[key]?.available === false).map(([, label]) => label)
+			: [];
+	$: confirmedMissingMessage = confirmedMissingReadings.length === 1
+		? `${confirmedMissingReadings[0]} is unavailable for this update.`
+		: `${confirmedMissingReadings.slice(0, -1).join(', ')} and ${confirmedMissingReadings.at(-1)} are unavailable for this update.`;
+
+	function windExplanation(speed: number | null | undefined) {
+		if (speed == null) return 'No verified wind reading for this update';
+		if (speed < 5) return 'The air is calm, with little movement of loose dust';
+		if (speed < 15) return 'A light wind is moving through the area';
+		if (speed < 25) return 'The wind is moving steadily and may disturb loose soil';
+		if (speed < 35) return 'The wind is moving rapidly and can lift loose dust';
+		return 'Strong winds can lift and carry large amounts of loose dust';
+	}
+
+	function temperatureExplanation(value: number | null | undefined) {
+		if (value == null) return 'No verified temperature reading for this update';
+		if (value < 20) return 'Conditions are relatively cool for this area';
+		if (value < 30) return 'Conditions are warm';
+		if (value < 40) return 'Conditions are hot and surface drying may increase';
+		return 'Extreme heat can dry exposed ground quickly';
+	}
+
+	function soilMoistureExplanation(value: number | null | undefined) {
+		if (value == null) return 'No verified soil-moisture reading for this update';
+		if (value < 0.03) return 'The surface is extremely dry and loose dust can lift easily';
+		if (value < 0.08) return 'The surface is very dry and may release loose dust';
+		if (value < 0.15) return 'The surface is dry';
+		if (value < 0.25) return 'The surface has moderate moisture';
+		return 'The surface is moist, which can reduce loose dust';
+	}
+
+	function aodExplanation(value: number | null | undefined) {
+		if (value == null) return 'No verified particle reading for this update';
+		if (value < 0.05) return 'The sky has very few airborne particles and is likely clear';
+		if (value < 0.20) return 'The sky has a low amount of airborne particles';
+		if (value < 0.40) return 'The sky has a moderate amount of airborne particles';
+		if (value < 0.70) return 'The sky has many airborne particles and may appear hazy';
+		if (value < 1.00) return 'The particle level is high and visibility may be reduced';
+		return 'The sky is very hazy with a very high amount of airborne particles';
+	}
 
 	function predictionCacheKey(location: Location) {
 		return `sahelwatch:central:${(location.forecastLat ?? location.lat).toFixed(2)}:${(location.forecastLon ?? location.lon).toFixed(2)}`;
@@ -109,8 +171,8 @@
 	}
 	async function updateSubscription() {
 		settingsBusy = true; phoneMessage = '';
-		try { await saveAlertSubscription(selected, alertThreshold); phoneMessage = `SMS alerts saved for ${selected.name} at ${alertThreshold} level.`; }
-		catch (error) { phoneMessage = error instanceof Error ? error.message : 'Could not save alert preference.'; }
+		try { await saveAlertSubscription(selected, alertThreshold); phoneMessageType = 'success'; phoneMessage = `SMS alerts saved for ${selected.name} at ${alertThreshold} level.`; }
+		catch (error) { phoneMessageType = 'error'; phoneMessage = error instanceof Error ? error.message : 'Could not save alert preference.'; }
 		finally { settingsBusy = false; }
 	}
 	async function sendDeleteCode() {
@@ -132,7 +194,7 @@
 				await deleteFirebaseAccount(idToken);
 			} else await confirmAccountDeletion(deleteChallengeId, deleteCode);
 			await signOutFirebase().catch(() => {});
-			authState = { authenticated: false }; linkedPhone = ''; showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; deleteFirebaseConfirmation = null; phoneMessage = 'Your phone account and alert records were deleted.';
+			authState = { authenticated: false }; linkedPhone = ''; showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; deleteFirebaseConfirmation = null; phoneMessageType = 'success'; phoneMessage = 'Account deletion confirmed. Your data will be permanently removed after seven days.';
 		}
 		catch (error) { deleteError = error instanceof Error ? error.message : 'We could not delete the account. Please try again.'; }
 		finally { settingsBusy = false; }
@@ -143,7 +205,7 @@
 	}
 
 	async function signOut() {
-		await logout(); await signOutFirebase().catch(() => {}); authState = { authenticated: false }; linkedPhone = ''; phoneMessage = 'You are logged out. SMS alerts are disabled on this device.';
+		await logout(); await signOutFirebase().catch(() => {}); authState = { authenticated: false }; linkedPhone = ''; phoneMessageType = 'info'; phoneMessage = 'You are logged out. SMS alerts are disabled on this device.';
 	}
 	function finishOnboarding(event: CustomEvent<{ location: Location; phoneUid?: string }>) {
 		selected = event.detail.location; localStorage.setItem('sahelwatch:location', JSON.stringify(selected));
@@ -197,7 +259,7 @@
 	<OnboardingFlow {deviceId} {locations} initialLocation={selected} on:complete={finishOnboarding}/>
 {/if}
 {#if showAuth}<OnboardingFlow {deviceId} {locations} initialLocation={selected} authOnly on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
-{#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span>{#if deleteStep === 'confirm'}<h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">Your phone number, sign-ins, SMS choices and alert records will be permanently removed. We will send a code to +{linkedPhone} before anything is deleted.</p><div id="delete-firebase-recaptcha"></div>{:else}<h2 id="delete-title">Enter the code from your phone</h2><p id="delete-description">Enter the six-digit code sent to +{linkedPhone}. Your account will be deleted only after the code is accepted.</p><label for="delete-code">Verification code</label><input id="delete-code" class="delete-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={deleteCode} placeholder="000000" />{/if}{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={closeDeleteDialog}>Keep account</button>{#if deleteStep === 'confirm'}<button class="delete-confirm" disabled={settingsBusy} on:click={sendDeleteCode}>{settingsBusy ? 'Sending code...' : 'Send code'}</button>{:else}<button class="delete-confirm" disabled={settingsBusy || deleteCode.length !== 6} on:click={removeAccount}>{settingsBusy ? 'Deleting...' : 'Verify and delete'}</button>{/if}</div></section></div>{/if}
+{#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span>{#if deleteStep === 'confirm'}<h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">SMS alerts and sign-ins will stop immediately. Your phone account and alert choices will be permanently removed after seven days. We will send a code to +{linkedPhone} first.</p><div id="delete-firebase-recaptcha"></div>{:else}<h2 id="delete-title">Enter the code from your phone</h2><p id="delete-description">Enter the six-digit code sent to +{linkedPhone}. After verification, the account will be deactivated and scheduled for removal in seven days.</p><label for="delete-code">Verification code</label><input id="delete-code" class="delete-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={deleteCode} placeholder="000000" />{/if}{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={closeDeleteDialog}>Keep account</button>{#if deleteStep === 'confirm'}<button class="delete-confirm" disabled={settingsBusy} on:click={sendDeleteCode}>{settingsBusy ? 'Sending code...' : 'Send code'}</button>{:else}<button class="delete-confirm" disabled={settingsBusy || deleteCode.length !== 6} on:click={removeAccount}>{settingsBusy ? 'Scheduling...' : 'Verify and schedule deletion'}</button>{/if}</div></section></div>{/if}
 
 <div class="app-shell">
 	{#if prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
@@ -236,15 +298,15 @@
 			</section>
 
 			<section class="metrics" aria-label="Environmental forecast indicators">
-				<article class="glass"><span class="metric-icon"><Wind size={20}/></span><div><p>Wind speed</p><strong>{conditions ? `${conditions.windSpeedKmh} km/h` : 'Unavailable'}</strong><small>{conditions ? `${conditions.windDirectionDeg}° direction` : 'Latest wind reading'}</small></div></article>
-				<article class="glass"><span class="metric-icon"><Thermometer size={20}/></span><div><p>Temperature</p><strong>{conditions ? `${conditions.temperatureC}°C` : 'Unavailable'}</strong><small>Latest reading near this area</small></div></article>
-				<article class="glass"><span class="metric-icon"><Droplets size={20}/></span><div><p>Soil moisture</p><strong>{conditions ? `${(conditions.soilMoisture * 100).toFixed(1)}%` : progressive ? `${(progressive.soilMoisture * 100).toFixed(1)}%` : 'Unavailable'}</strong><small>Drier ground can release more dust</small></div></article>
-				<article class="glass"><span class="metric-icon"><Gauge size={20}/></span><div><p>Dust in the air</p><strong>{aodAvailable && conditions?.aod != null ? conditions.aod.toFixed(2) : aodAvailable && progressive?.aod != null ? progressive.aod.toFixed(2) : 'Unavailable'}</strong><small>{aodAvailable ? aodDescription : 'No valid dust reading in this stored update'}</small></div></article>
+				<article class="glass"><span class="metric-icon"><Wind size={20}/></span><div><p>Wind speed</p><strong>{conditions?.windSpeedKmh != null ? `${conditions.windSpeedKmh} km/h` : 'Unavailable'}</strong><small>{windExplanation(conditions?.windSpeedKmh)}{#if conditions?.windDirectionDeg != null}<span>{conditions.windDirectionDeg}° direction</span>{/if}</small></div></article>
+				<article class="glass"><span class="metric-icon"><Thermometer size={20}/></span><div><p>Temperature</p><strong>{conditions?.temperatureC != null ? `${conditions.temperatureC}°C` : 'Unavailable'}</strong><small>{temperatureExplanation(conditions?.temperatureC)}</small></div></article>
+				<article class="glass"><span class="metric-icon"><Droplets size={20}/></span><div><p>Soil moisture</p><strong>{soilMoistureValue != null ? `${(soilMoistureValue * 100).toFixed(1)}%` : 'Unavailable'}</strong><small>{soilMoistureExplanation(soilMoistureValue)}</small></div></article>
+				<article class="glass"><span class="metric-icon"><Gauge size={20}/></span><div><p>Particles in the air (AOD)</p><strong>{aodAvailable && aodValue != null ? aodValue.toFixed(2) : 'Unavailable'}</strong><small>{aodAvailable ? aodExplanation(aodValue) : 'No verified AOD reading for this update'}{#if aodAvailable}<span>{aodDescription}</span>{/if}</small></div></article>
 			</section>
 
-			{#if prediction.inputQuality?.degraded || progressive?.inputQuality?.degraded}<div class="data-warning" role="status"><Info size={18}/><p>{#if !aodAvailable}<strong>Dust-in-air data was unavailable for this stored update.</strong> The next central update will use current atmospheric analysis when a recent satellite reading is delayed.{:else}<strong>Some satellite surface readings are delayed.</strong> Available weather analysis was used and the outlook will update when newer observations arrive.{/if}</p></div>{/if}
+			{#if confirmedMissingReadings.length > 0}<div class="data-warning" role="status"><Info size={18}/><p><strong>Confirmed missing reading:</strong> {confirmedMissingMessage} SahelWatch used the available readings and will check again during the next central update.</p></div>{/if}
 			<section class="explanation glass">
-				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% chance of dusty conditions` : online ? `Latest dust outlook for ${selected.name}` : 'Dust information is temporarily unavailable'}</h2><p>{progressive?.message || (online ? 'This outlook updates automatically as new wind, temperature, ground and satellite readings arrive.' : 'Please check your connection and try again shortly.')}</p><small>{progressive ? `${progressive.observedHours} recent weather readings are available; the remaining hours use the latest weather forecast.` : 'Weather details are shown only when recent readings are available.'}</small></div>
+				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>{progressive ? `${Math.round(progressive.probability * 100)}% chance of dusty conditions` : online ? `Latest dust outlook for ${selected.name}` : 'Dust information is temporarily unavailable'}</h2><p>{progressive?.message || (online ? 'This outlook updates automatically when newer environmental information becomes available.' : 'Please check your connection and try again shortly.')}</p><small>{prediction.evidenceSummary ? `${Math.round(prediction.evidenceSummary.inputCompleteness * 100)}% of expected inputs were available. Each value is marked as a forecast, analysis or reading by the service.` : 'Weather details are shown only when verified source information is available.'}</small></div>
 			</section>
 
 			<section class="forecast-strip glass">
@@ -262,7 +324,7 @@
 			</div>
 			<section class="tracking-grid">
 				<div class="tracking-map glass">{#if PredictionMapComponent}<svelte:component this={PredictionMapComponent} location={selected} {prediction} conditions={prediction.conditions}/>{/if}</div>
-				<aside class="detail glass"><div class="detail-top"><span class="badge {horizon?.riskLevel || riskTone}">{horizon?.riskLevel || prediction.riskLevel}</span><small>{horizon?.targetDate || prediction.predictionDate}</small></div><h2>{horizon ? Math.round(horizon.probability * 100) : probability}% chance</h2><p>{horizon ? `Dust outlook for ${horizon.targetDate}.` : riskCopy}</p><dl><div><dt><Clock3 size={17}/>Outlook period</dt><dd>{horizon?.approximateLeadTime || 'Next 24–48 hours'}</dd></div><div><dt><Activity size={17}/>Wind speed</dt><dd>{conditions ? `${conditions.windSpeedKmh} km/h` : 'Not available'}</dd></div><div><dt><ShieldCheck size={17}/>Ground condition</dt><dd>{conditions ? `${(conditions.soilMoisture * 100).toFixed(1)}% moisture` : 'Not available'}</dd></div><div><dt><Map size={17}/>Area</dt><dd>{selected.name}, {selected.country}</dd></div></dl><div class="notice"><Info size={18}/><p>The line on the map shows where the wind is moving. It is not a storm boundary or evacuation route. Follow local authorities during dangerous weather.</p></div></aside>
+				<aside class="detail glass"><div class="detail-top"><span class="badge {horizon?.riskLevel || riskTone}">{horizon?.riskLevel || prediction.riskLevel}</span><small>{horizon?.targetDate || prediction.predictionDate}</small></div><h2>{horizon ? Math.round(horizon.probability * 100) : probability}% chance</h2><p>{horizon ? `Dust outlook for ${horizon.targetDate}.` : riskCopy}</p><dl><div><dt><Clock3 size={17}/>Outlook period</dt><dd>{horizon?.approximateLeadTime || 'Next 24–48 hours'}</dd></div><div><dt><Activity size={17}/>Wind speed</dt><dd>{conditions?.windSpeedKmh != null ? `${conditions.windSpeedKmh} km/h` : 'Not available'}</dd></div><div><dt><ShieldCheck size={17}/>Ground condition</dt><dd>{conditions?.soilMoisture != null ? `${(conditions.soilMoisture * 100).toFixed(1)}% moisture` : 'Not available'}</dd></div><div><dt><Map size={17}/>Area</dt><dd>{selected.name}, {selected.country}</dd></div></dl><div class="notice"><Info size={18}/><p>The line on the map shows where the wind is moving. It is not a storm boundary or evacuation route. Follow local authorities during dangerous weather.</p></div></aside>
 			</section>
 
 		{:else if activeTab === 'history'}
@@ -293,7 +355,7 @@
 		{:else}
 			<section class="utility-page settings-page">
 				<div class="subpage-head"><div><p class="eyebrow">Personalisation</p><h1>Settings</h1><p>Your phone number is the only personal information SahelWatch needs.</p></div></div>
-				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is linked securely to your account. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button><button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{/if}{#if phoneMessage}<p class="form-message" role="status" aria-live="polite">{phoneMessage}</p>{/if}</section>
+				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is linked securely to your account. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button>{#if phoneMessage}<p class:error={phoneMessageType === 'error'} class="form-message" role={phoneMessageType === 'error' ? 'alert' : 'status'} aria-live="polite"><ShieldCheck size={17}/><span>{phoneMessage}</span></p>{/if}<button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{#if phoneMessage}<p class:error={phoneMessageType === 'error'} class="form-message" role={phoneMessageType === 'error' ? 'alert' : 'status'} aria-live="polite"><ShieldCheck size={17}/><span>{phoneMessage}</span></p>{/if}{/if}</section>
 				<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a>{#if authState.authenticated}<button class="danger-row" disabled={settingsBusy} on:click={() => { deleteError=''; deleteStep='confirm'; showDeleteConfirm=true; }}><Trash2 size={17}/>Delete account and alert records</button>{/if}</section>
 			</section>
 		{/if}
@@ -351,4 +413,7 @@
 		.phone-field { align-items: stretch; flex-wrap: wrap; }.phone-field input { min-height: 48px; }.phone-field button { width: 100%; min-height: 48px; justify-content: center; }
 	}
 	.confirm-card label{display:block;margin:18px 0 8px;font-size:.8rem;font-weight:700}.delete-code{width:100%;min-height:52px;padding:0 14px;border:1px solid var(--border);border-radius:15px;color:var(--text);background:var(--surface-muted);font-size:1.35rem;letter-spacing:.25em;text-align:center}
+	.form-message{padding:12px 14px;display:flex;align-items:center;gap:9px;border:1px solid color-mix(in srgb,var(--green) 30%,var(--border));border-radius:14px;color:var(--text);background:color-mix(in srgb,var(--green) 10%,var(--surface));font-size:.82rem}.form-message svg{flex:none;color:var(--green)}
+	.form-message.error{border-color:color-mix(in srgb,var(--red) 35%,var(--border));background:color-mix(in srgb,var(--red) 10%,var(--surface))}.form-message.error svg{color:var(--red)}
+	.metrics small span{display:block;margin-top:4px;color:var(--text-tertiary)}
 </style>

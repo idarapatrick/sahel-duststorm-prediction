@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class LocationPrediction(BaseModel):
+    """Single daily dust-risk response for one supported coordinate."""
     lat: float
     lon: float
     location_name: str
@@ -24,6 +25,7 @@ class LocationPrediction(BaseModel):
 
 
 class ForecastDay(BaseModel):
+    """One calendar-day result returned by a validated horizon model."""
     date: str
     probability: float = Field(ge=0.0, le=1.0)
     risk_level: str
@@ -31,6 +33,7 @@ class ForecastDay(BaseModel):
 
 
 class MultiDayForecast(BaseModel):
+    """Collection of daily results sharing one issue time and location."""
     lat: float
     lon: float
     location_name: str
@@ -39,6 +42,7 @@ class MultiDayForecast(BaseModel):
 
 
 class HistoricalSnapshot(BaseModel):
+    """Immutable prediction revision exposed through the history API."""
     id: str
     lat: float
     lon: float
@@ -53,6 +57,7 @@ class HistoricalSnapshot(BaseModel):
 
 
 class DailyHorizonPrediction(BaseModel):
+    """One disabled multi-horizon head retained for future deployment."""
     horizon: str
     target_date: str
     approximate_lead_time: str
@@ -62,6 +67,7 @@ class DailyHorizonPrediction(BaseModel):
 
 
 class DailyHorizonResponse(BaseModel):
+    """Response contract for the pending three-head daily model."""
     lat: float
     lon: float
     location_name: str
@@ -74,6 +80,7 @@ class DailyHorizonResponse(BaseModel):
 
 
 class CurrentConditionsResponse(BaseModel):
+    """Latest provider conditions displayed beside a prediction."""
     lat: float
     lon: float
     location_name: str
@@ -81,33 +88,39 @@ class CurrentConditionsResponse(BaseModel):
 
 
 class OtpRequest(BaseModel):
+    """Legacy phone-verification request retained during Firebase migration."""
     phone: str
     purpose: str
     device_id: str | None = None
 
 
 class PreferredLocation(BaseModel):
+    """User-selected forecast location stored with a phone account."""
     name: str
     lat: float
     lon: float
 
 
 class OtpVerification(BaseModel):
+    """Legacy OTP challenge answer and optional initial location."""
     challenge_id: str
     code: str
     preferred_location: PreferredLocation | None = None
 
 
 class AccountDeletionRequest(BaseModel):
+    """Request to begin verified account deletion."""
     device_id: str | None = None
 
 
 class AccountDeletionConfirmation(BaseModel):
+    """Verified legacy OTP confirmation for account deletion."""
     challenge_id: str
     code: str
 
 
 class FirebaseSessionRequest(BaseModel):
+    """Firebase identity token exchanged for a SahelWatch session."""
     id_token: str
     purpose: str
     device_id: str | None = None
@@ -115,10 +128,12 @@ class FirebaseSessionRequest(BaseModel):
 
 
 class FirebaseAccountDeletion(BaseModel):
+    """Fresh Firebase identity proof used to schedule account deletion."""
     id_token: str
 
 
 class SubscriptionRequest(BaseModel):
+    """SMS alert preference for one centrally monitored forecast cell."""
     lat: float
     lon: float
     location_name: str

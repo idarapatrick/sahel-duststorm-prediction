@@ -14,19 +14,26 @@ export interface Prediction {
 	lat: number; lon: number; locationName: string; probability: number; riskLevel: RiskLevel;
 	dustEvent: boolean; predictionDate: string; dataSource: string;
 	conditions?: Conditions;
-	surfaceData?: { soilMoisture: number; vegetationWaterContent: number; aod: number };
+	surfaceData?: { soilMoisture: number | null; vegetationWaterContent: number | null; aod: number | null };
 	inputQuality?: { degraded: boolean; warning?: string; fields?: Record<string, any> };
 	freshness?: { recordedAt: string; ageMinutes: number; stale: boolean; source: string };
+	environmentalEvidence?: EnvironmentalEvidence[];
+	evidenceSummary?: { observedFraction: number; forecastFraction: number; inputCompleteness: number };
 	available?: boolean;
+}
+export interface EnvironmentalEvidence {
+	variableName: string; value: number | null; unit?: string; provider: string;
+	kind: 'observation' | 'analysis' | 'forecast' | 'delayed_observation' | 'fallback' | 'missing';
+	measuredAt?: string; availableAt: string; qualityStatus: string; isFallback: boolean;
 }
 export interface HistoricalSnapshot extends Prediction {
 	id: string; recordedAt: string; targetDate: string; modelVersion?: string; source: 'live' | 'demo';
 }
 
 export interface Conditions {
-	observedAt: string; windSpeedMs: number; windSpeedKmh: number; windDirectionDeg: number;
-	temperatureC: number; surfacePressureHpa: number; precipitationMm: number;
-	dewpointC: number; soilMoisture: number; vegetationWaterContent: number; aod: number;
+	observedAt: string; windSpeedMs: number | null; windSpeedKmh: number | null; windDirectionDeg: number | null;
+	temperatureC: number | null; surfacePressureHpa: number | null; precipitationMm: number | null;
+	dewpointC: number | null; soilMoisture: number | null; vegetationWaterContent: number | null; aod: number | null;
 }
 export interface DailyHorizonPrediction {
 	horizon: 'day+0' | 'day+1' | 'day+2'; targetDate: string; approximateLeadTime: string;

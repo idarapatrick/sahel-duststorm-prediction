@@ -120,6 +120,7 @@ def purge_expired() -> None:
 
 
 def save_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Persist an immutable prediction revision and return its stored identity."""
     record = {
         "id": str(uuid.uuid4()), "lat": float(snapshot["lat"]), "lon": float(snapshot["lon"]),
         "location_name": snapshot["location_name"], "target_date": str(snapshot["target_date"]),
@@ -127,20 +128,70 @@ def save_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "probability": float(snapshot["probability"]), "alert_level": snapshot["alert_level"],
         "dust_event": bool(snapshot["dust_event"]), "data_source": snapshot.get("data_source", "open-meteo+gee"),
         "model_version": snapshot.get("model_version"), "metadata": snapshot.get("metadata", {}),
+        "revision_reason": snapshot.get("revision_reason", "scheduled_evidence_refresh"),
+        "evidence_fingerprint": snapshot.get("evidence_fingerprint"),
+        "observed_fraction": snapshot.get("observed_fraction"),
+        "forecast_fraction": snapshot.get("forecast_fraction"),
+        "input_completeness": snapshot.get("input_completeness"),
     }
     purge_expired()
     if _using_postgres():
         from psycopg.types.json import Jsonb
         with _postgres_connection() as connection:
+            lock_key = (
+                f"revision:{record['lat']:.3f}:{record['lon']:.3f}:"
+                f"{record['target_date']}"
+            )
             connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (lock_key,),
+            )
+            revision_row = connection.execute(
+                """SELECT coalesce(max(revision_number), 0) + 1 AS next_revision
+                   FROM prediction_snapshots
+                   WHERE target_date=%s
+                     AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s""",
+                (
+                    record["target_date"],
+                    record["lat"] - 0.001,
+                    record["lat"] + 0.001,
+                    record["lon"] - 0.001,
+                    record["lon"] + 0.001,
+                ),
+            ).fetchone()
+            record["revision_number"] = int(revision_row["next_revision"])
+            inserted = connection.execute(
                 """INSERT INTO prediction_snapshots
                    (id, lat, lon, location_name, target_date, recorded_at, probability,
-                    alert_level, dust_event, data_source, model_version, metadata)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    alert_level, dust_event, data_source, model_version, metadata,
+                    revision_number,revision_reason,evidence_fingerprint,
+                    observed_fraction,forecast_fraction,input_completeness)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT DO NOTHING RETURNING id""",
                 (record["id"], record["lat"], record["lon"], record["location_name"], record["target_date"],
                  record["recorded_at"], record["probability"], record["alert_level"], record["dust_event"],
-                 record["data_source"], record["model_version"], Jsonb(record["metadata"])),
-            )
+                 record["data_source"], record["model_version"], Jsonb(record["metadata"]),
+                 record["revision_number"], record["revision_reason"],
+                 record["evidence_fingerprint"], record["observed_fraction"],
+                 record["forecast_fraction"], record["input_completeness"]),
+            ).fetchone()
+            if not inserted and record["evidence_fingerprint"]:
+                existing = connection.execute(
+                    """SELECT id,revision_number FROM prediction_snapshots
+                       WHERE target_date=%s
+                         AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s
+                         AND evidence_fingerprint=%s LIMIT 1""",
+                    (
+                        record["target_date"],
+                        record["lat"] - 0.001,
+                        record["lat"] + 0.001,
+                        record["lon"] - 0.001,
+                        record["lon"] + 0.001,
+                        record["evidence_fingerprint"],
+                    ),
+                ).fetchone()
+                record["id"] = str(existing["id"])
+                record["revision_number"] = int(existing["revision_number"])
         return record
     with _sqlite_connection() as connection:
         connection.execute(

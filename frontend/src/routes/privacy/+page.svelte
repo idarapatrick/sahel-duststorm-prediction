@@ -14,7 +14,7 @@
 	<h2>Optional SMS alerts</h2>
 	<p>Users who do not link a phone number can still use forecasts and in-app alerts, but cannot receive SMS alerts while offline. SMS preferences can be changed by logging out, unlinking or deleting the account.</p>
 	<h2>Retention and deletion</h2>
-	<p>Prediction snapshots and detailed reinforcement evidence are retained for up to 90 days. Sessions and operational SMS records are retained only as needed for security, delivery reconciliation and legal obligations. Account deletion requires fresh phone verification. After confirmation, the phone identity, sessions, alert choices and associated delivery records are deleted. Firebase identity cleanup is retried automatically if the provider is temporarily unavailable.</p>
+	<p>Prediction snapshots and detailed reinforcement evidence are retained for up to 90 days. Sessions and operational SMS records are retained only as needed for security, delivery reconciliation and legal obligations. Account deletion requires fresh phone verification. After confirmation, sign-ins and SMS alerts stop immediately. The phone identity, alert choices and associated account records are permanently removed after seven days. Firebase identity cleanup is retried automatically if the provider is temporarily unavailable.</p>
 	<h2>Research notice</h2>
 	<p>SahelWatch is a research forecasting system and is not an official emergency-warning authority.</p>
 </main>

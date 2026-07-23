@@ -110,17 +110,38 @@ export async function getLatestPrediction(location: Location): Promise<Predictio
 	const d = await getJson(`/api/v1/predictions/latest?lat=${point.lat}&lon=${point.lon}`, 3_000);
 	const x = d.prediction;
 	const c = d.current_conditions;
+	const fieldEvidence = Array.isArray(d.environmental_evidence) ? d.environmental_evidence.map((item: any) => ({
+		variableName: item.variable_name, value: item.value == null ? null : Number(item.value),
+		unit: item.unit, provider: item.provider, kind: item.evidence_kind,
+		measuredAt: item.measured_at, availableAt: item.available_at,
+		qualityStatus: item.quality_status, isFallback: Boolean(item.is_fallback)
+	})) : [];
+	const evidenceByName = new Map(fieldEvidence.map((item: any) => [item.variableName, item]));
+	const soilEvidence: any = evidenceByName.get('soil_moisture');
+	const aodEvidence: any = evidenceByName.get('previous_day_aod');
+	const soilValue = soilEvidence
+		? (soilEvidence.qualityStatus === 'valid' ? soilEvidence.value : null)
+		: c?.soil_moisture;
+	const aodValue = aodEvidence
+		? (aodEvidence.qualityStatus === 'valid' ? aodEvidence.value : null)
+		: c?.aod;
 	return { lat: x.lat, lon: x.lon, locationName: x.location_name, probability: x.probability,
 		riskLevel: x.alert_level, dustEvent: x.dust_event, predictionDate: x.target_date,
 		dataSource: x.data_source, available: true,
 		conditions: c ? { observedAt: c.observed_at, windSpeedMs: c.wind_speed_ms, windSpeedKmh: c.wind_speed_kmh,
 			windDirectionDeg: c.wind_direction_deg, temperatureC: c.temperature_c,
 			surfacePressureHpa: c.surface_pressure_hpa, precipitationMm: c.precipitation_mm,
-			dewpointC: c.dewpoint_c ?? 0, soilMoisture: c.soil_moisture,
-			vegetationWaterContent: c.vegetation_water_content, aod: c.aod } : undefined,
-		surfaceData: d.surface_data ? { soilMoisture: d.surface_data.soil_moisture, vegetationWaterContent: d.surface_data.vegetation_water_content, aod: d.surface_data.prev_day_aod } : undefined,
+			dewpointC: c.dewpoint_c ?? 0, soilMoisture: soilValue,
+			vegetationWaterContent: c.vegetation_water_content, aod: aodValue } : undefined,
+		surfaceData: d.surface_data ? { soilMoisture: soilValue, vegetationWaterContent: d.surface_data.vegetation_water_content, aod: aodValue } : undefined,
 		inputQuality: d.evidence?.raw_payload?.input_quality ? { degraded: d.evidence.raw_payload.input_quality.degraded, warning: d.evidence.raw_payload.input_quality.warning, fields: d.evidence.raw_payload.input_quality } : undefined,
-		freshness: d.freshness ? { recordedAt: d.freshness.recorded_at, ageMinutes: d.freshness.age_minutes, stale: d.freshness.stale, source: d.freshness.source } : undefined };
+		freshness: d.freshness ? { recordedAt: d.freshness.recorded_at, ageMinutes: d.freshness.age_minutes, stale: d.freshness.stale, source: d.freshness.source } : undefined,
+		environmentalEvidence: fieldEvidence,
+		evidenceSummary: {
+			observedFraction: Number(x.observed_fraction ?? 0),
+			forecastFraction: Number(x.forecast_fraction ?? 0),
+			inputCompleteness: Number(x.input_completeness ?? 0)
+		} };
 }
 
 export async function getCurrentConditions(location: Location) {

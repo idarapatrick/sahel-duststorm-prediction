@@ -1,15 +1,9 @@
-"""
-SahelDust Data Pipeline
-Fetches real-time forecast data from Open-Meteo (atmospheric)
-and Google Earth Engine (SMAP soil moisture, MODIS AOD).
+"""Build the deployed model's atmospheric and surface input payload.
 
-Supports two modes:
-1. Forecast mode: predicts dust events 24-72 hours ahead using forecast data
-2. Historical mode: uses past observations for validation and demo
-
-Open-Meteo provides atmospheric forecast data with no authentication required.
-GEE provides SMAP and MODIS observations with a variable ingestion lag.
-Current CAMS global AOD fills hours where a recent MODIS granule is absent.
+Open-Meteo supplies modelled atmospheric fields, Earth Engine supplies delayed
+SMAP and MODIS observations, and CAMS supplies an aerosol analysis fallback.
+The module preserves provider provenance and never describes elapsed forecast
+hours as measurements merely because their timestamps are now in the past.
 """
 
 import asyncio
@@ -120,7 +114,13 @@ def _fetch_openmeteo_current(lat: float, lon: float) -> dict:
 
 
 def _fetch_cams_aod(lat: float, lon: float) -> tuple[float, str | None]:
-    """Return current global CAMS AOD when delayed MODIS data is unavailable."""
+    """Return the latest valid CAMS global AOD analysis or forecast.
+
+    The CAMS ``current`` object can briefly be empty while a new model cycle is
+    being published. Requesting the hourly series as well lets SahelWatch use
+    the most recent valid value from the preceding 72 hours instead of storing
+    a missing observation as a measured AOD of zero.
+    """
     try:
         response = requests.get(
             OPEN_METEO_AIR_QUALITY_URL,
@@ -128,18 +128,38 @@ def _fetch_cams_aod(lat: float, lon: float) -> tuple[float, str | None]:
                 "latitude": lat,
                 "longitude": lon,
                 "current": "aerosol_optical_depth",
+                "hourly": "aerosol_optical_depth",
                 "domains": "cams_global",
+                "past_days": 3,
+                "forecast_days": 1,
                 "timezone": "UTC",
             },
             timeout=20,
         )
         response.raise_for_status()
-        current = response.json().get("current") or {}
+        payload = response.json()
+        current = payload.get("current") or {}
         value = current.get("aerosol_optical_depth")
-        if value is None or float(value) < 0:
-            return 0.0, None
-        observed_at = current.get("time")
-        return float(value), f"{observed_at}:00Z" if observed_at and len(observed_at) == 16 else observed_at
+        if value is not None and float(value) >= 0:
+            observed_at = current.get("time")
+            timestamp = (
+                f"{observed_at}:00Z"
+                if observed_at and len(observed_at) == 16
+                else observed_at
+            )
+            return float(value), timestamp
+
+        hourly = payload.get("hourly") or {}
+        times = hourly.get("time") or []
+        values = hourly.get("aerosol_optical_depth") or []
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        for observed_at, hourly_value in reversed(list(zip(times, values))):
+            if hourly_value is None or float(hourly_value) < 0:
+                continue
+            observed_time = datetime.fromisoformat(observed_at)
+            if observed_time <= now_naive:
+                return float(hourly_value), f"{observed_at}:00Z"
+        return 0.0, None
     except Exception as exc:
         print(f"CAMS AOD lookup failed for {lat:.3f},{lon:.3f}: {type(exc).__name__}")
         return 0.0, None
@@ -270,6 +290,69 @@ def _extract_72h_window(data: dict, target_date: datetime) -> list:
     return atmospheric
 
 
+def _extract_72h_series(
+    data: dict, target_date: datetime, atmospheric: list | None = None
+) -> dict[str, list]:
+    """Return the timestamped Open-Meteo values represented in the model tensor."""
+    hourly = data["hourly"]
+    times = hourly.get("time")
+    if not times and atmospheric is not None:
+        window_start = target_date.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) - timedelta(hours=60)
+        timestamps = [
+            (window_start + timedelta(hours=offset)).strftime(
+                "%Y-%m-%dT%H:%M:00Z"
+            )
+            for offset in range(len(atmospheric))
+        ]
+        return {
+            "timestamps": timestamps,
+            "wind_speed_10m": [
+                math.hypot(row[0], row[1]) for row in atmospheric
+            ],
+            "wind_direction_10m": [None for _ in atmospheric],
+            "temperature_2m": [row[2] - 273.15 for row in atmospheric],
+            "surface_pressure": [row[3] / 100 for row in atmospheric],
+            "boundary_layer_height": [row[4] for row in atmospheric],
+            "precipitation": [row[5] * 1000 for row in atmospheric],
+            "dewpoint_2m": [row[6] - 273.15 for row in atmospheric],
+        }
+    if not times:
+        raise RuntimeError("The Open-Meteo response has no hourly timestamps")
+    target_hour = target_date.strftime("%Y-%m-%dT00:00")
+    if target_hour in times:
+        closest_idx = times.index(target_hour)
+    else:
+        target_dt = datetime.strptime(target_hour, "%Y-%m-%dT%H:%M")
+        closest_idx = min(
+            range(len(times)),
+            key=lambda i: abs(
+                datetime.strptime(times[i], "%Y-%m-%dT%H:%M") - target_dt
+            ),
+        )
+    start_idx = closest_idx - 60
+    end_idx = closest_idx + 12
+    if start_idx < 0 or end_idx > len(times):
+        raise RuntimeError("The Open-Meteo response does not contain the 72-hour window")
+    names = (
+        "wind_speed_10m",
+        "wind_direction_10m",
+        "temperature_2m",
+        "surface_pressure",
+        "boundary_layer_height",
+        "precipitation",
+        "dewpoint_2m",
+    )
+    return {
+        "timestamps": [f"{value}:00Z" for value in times[start_idx:end_idx]],
+        **{
+            name: hourly[name][start_idx:end_idx]
+            for name in names
+        },
+    }
+
+
 def _extract_soil_moisture(data: dict, target_date: datetime) -> float:
     hourly = data["hourly"]
     times = hourly["time"]
@@ -350,7 +433,7 @@ def _fetch_smap_gee(lat, lon, date):
 
 def _fetch_modis_aod_gee(lat, lon, date):
     if not GEE_AVAILABLE:
-        return 0.0
+        return None
 
     date_naive = date.replace(tzinfo=None) if date.tzinfo else date
 
@@ -365,7 +448,7 @@ def _fetch_modis_aod_gee(lat, lon, date):
         )
 
         if modis.size().getInfo() == 0:
-            return 0.0
+            return None
 
         # MODIS AOD is frequently cloud or quality masked at a single point.
         # Use the mean valid reading within 25 km of the forecast grid point.
@@ -376,14 +459,14 @@ def _fetch_modis_aod_gee(lat, lon, date):
         ).getInfo()
         value = values.get("Optical_Depth_055")
         if value is None:
-            return 0.0
+            return None
         raw = float(value)
         if raw <= 0:
-            return 0.0
+            return None
         return raw * 0.001
     except Exception as exc:
         print(f"MODIS AOD lookup failed for {lat:.3f},{lon:.3f} on {date_naive:%Y-%m-%d}: {type(exc).__name__}")
-        return 0.0
+        return None
 
 
 async def fetch_features(lat: float, lon: float) -> tuple[list, list, str]:
@@ -465,6 +548,7 @@ async def build_prediction_inputs(lat, lon, date, loop=None):
     silently diverge between callers.
     """
     loop = loop or asyncio.get_running_loop()
+    retrieved_at = datetime.now(timezone.utc)
     raw_data = await loop.run_in_executor(
         None, _fetch_openmeteo_forecast, lat, lon, date
     )
@@ -503,7 +587,7 @@ async def build_prediction_inputs(lat, lon, date, loop=None):
             prev_aod = await loop.run_in_executor(
                 None, _fetch_modis_aod_gee, lat, lon, aod_date
             )
-            if prev_aod > 0:
+            if prev_aod is not None and prev_aod > 0:
                 aod_observed_at = aod_date.strftime("%Y-%m-%d")
                 aod_source = "modis"
                 break
@@ -520,15 +604,48 @@ async def build_prediction_inputs(lat, lon, date, loop=None):
 
     surface = [sm, vwc, prev_aod, lat, lon, month_sin, month_cos]
 
+    target_midnight = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    if target_midnight.tzinfo is None:
+        target_midnight = target_midnight.replace(tzinfo=timezone.utc)
     provenance = {
-        "atmospheric": {"source": "open-meteo", "reference_date": date.strftime("%Y-%m-%d"), "available": True},
-        "soil_moisture": {"source": sm_source, "observed_at": smap_observed_at, "available": sm is not None},
-        "vegetation_water_content": {"source": "smap" if vwc_available else None, "observed_at": smap_observed_at if vwc_available else None, "available": vwc_available},
+        "retrieved_at": retrieved_at.isoformat(),
+        "atmospheric": {
+            "source": "open-meteo-forecast",
+            "reference_date": date.strftime("%Y-%m-%d"),
+            "available": True,
+            "available_at": retrieved_at.isoformat(),
+            "availability_is_estimated": True,
+            "kind": "forecast",
+            "forecast_target_at": target_midnight.isoformat(),
+            "series": _extract_72h_series(raw_data, date, atmospheric),
+        },
+        "soil_moisture": {
+            "source": sm_source,
+            "observed_at": smap_observed_at,
+            "available_at": retrieved_at.isoformat(),
+            "availability_is_estimated": True,
+            "available": sm is not None,
+            "kind": "delayed_observation" if sm_source == "smap" else "forecast",
+            "is_fallback": sm_source != "smap",
+            "forecast_target_at": target_midnight.isoformat() if sm_source != "smap" else None,
+        },
+        "vegetation_water_content": {
+            "source": "smap" if vwc_available else None,
+            "observed_at": smap_observed_at if vwc_available else None,
+            "available_at": retrieved_at.isoformat(),
+            "availability_is_estimated": True,
+            "available": vwc_available,
+            "kind": "delayed_observation" if vwc_available else "missing",
+            "is_fallback": False,
+        },
         "previous_day_aod": {
             "source": aod_source,
             "observed_at": aod_observed_at,
+            "available_at": retrieved_at.isoformat(),
+            "availability_is_estimated": True,
             "available": aod_observed_at is not None,
-            "kind": "satellite-observation" if aod_source == "modis" else "atmospheric-analysis" if aod_source else None,
+            "kind": "delayed_observation" if aod_source == "modis" else "analysis" if aod_source else "missing",
+            "is_fallback": aod_source == "cams-global",
         },
     }
     provenance["degraded"] = not all(

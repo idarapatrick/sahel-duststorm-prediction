@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import data_pipeline
 
@@ -11,6 +11,32 @@ class ImmediateExecutor:
 
 
 class SatelliteFallbackTests(unittest.IsolatedAsyncioTestCase):
+    def test_cams_uses_latest_hour_when_current_value_is_missing(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "current": {
+                "time": "2026-07-23T02:00",
+                "aerosol_optical_depth": None,
+            },
+            "hourly": {
+                "time": ["2026-07-22T23:00", "2026-07-23T00:00"],
+                "aerosol_optical_depth": [0.27, 0.31],
+            },
+        }
+        with (
+            patch.object(data_pipeline.requests, "get", return_value=response),
+            patch.object(data_pipeline, "datetime") as mocked_datetime,
+        ):
+            mocked_datetime.now.return_value = datetime(
+                2026, 7, 23, 1, 0, tzinfo=timezone.utc
+            )
+            mocked_datetime.fromisoformat.side_effect = datetime.fromisoformat
+            value, observed_at = data_pipeline._fetch_cams_aod(13.06, 5.24)
+
+        self.assertEqual(value, 0.31)
+        self.assertEqual(observed_at, "2026-07-23T00:00:00Z")
+
     async def test_eight_day_smap_miss_uses_open_meteo_and_marks_degraded(self):
         target = datetime(2026, 7, 21, tzinfo=timezone.utc)
         raw = {"hourly": {}}
@@ -79,7 +105,7 @@ class SatelliteFallbackTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(surface[2], 0.23)
         self.assertEqual(provenance["previous_day_aod"]["source"], "cams-global")
-        self.assertEqual(provenance["previous_day_aod"]["kind"], "atmospheric-analysis")
+        self.assertEqual(provenance["previous_day_aod"]["kind"], "analysis")
         self.assertTrue(provenance["previous_day_aod"]["available"])
         self.assertFalse(provenance["degraded"])
 

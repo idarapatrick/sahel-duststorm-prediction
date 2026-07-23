@@ -85,12 +85,16 @@ def create_firebase_session(
             (firebase_uid,),
         ).fetchone()
         by_phone = connection.execute(
-            "SELECT phone_uid,firebase_uid FROM alert_identities WHERE phone_uid=%s FOR UPDATE",
+            """SELECT phone_uid,firebase_uid,account_status,deletion_scheduled_for
+               FROM alert_identities WHERE phone_uid=%s FOR UPDATE""",
             (phone_uid,),
         ).fetchone()
         if by_uid and by_uid["phone_uid"] != phone_uid:
             raise AuthError(409, "This Firebase identity is already linked to another phone account")
         exists = bool(by_phone)
+        if by_phone and by_phone["account_status"] == "pending_deletion":
+            scheduled = by_phone["deletion_scheduled_for"].isoformat()
+            raise AuthError(409, f"This account is scheduled for deletion on {scheduled}")
         if purpose == "signup" and exists and by_phone["firebase_uid"] not in {None, firebase_uid}:
             raise AuthError(409, "This number is already linked. Log in instead.")
         if purpose == "login" and not exists:
@@ -154,12 +158,14 @@ def _finish_cleanup(firebase_uid: str, error: Exception | None = None) -> None:
             )
 
 
-def delete_firebase_account(session_user: dict[str, Any], id_token: str) -> None:
+def delete_firebase_account(session_user: dict[str, Any], id_token: str) -> datetime:
+    """Deactivate an account now and schedule permanent removal in seven days."""
     decoded = verify_firebase_token(id_token, require_recent=True)
     firebase_uid = str(decoded["uid"])
     phone_uid = normalize_phone(str(decoded["phone_number"]))
     if phone_uid != session_user["phone_uid"]:
         raise AuthError(403, "This Firebase account does not match the signed-in account")
+    scheduled_for = datetime.now(timezone.utc) + timedelta(days=7)
     with _postgres_connection() as connection:
         row = connection.execute(
             "SELECT firebase_uid FROM alert_identities WHERE phone_uid=%s FOR UPDATE",
@@ -168,18 +174,24 @@ def delete_firebase_account(session_user: dict[str, Any], id_token: str) -> None
         if not row or row["firebase_uid"] != firebase_uid:
             raise AuthError(403, "This Firebase account is not linked to the signed-in account")
         connection.execute(
-            """INSERT INTO firebase_identity_cleanup(firebase_uid)
-               VALUES (%s) ON CONFLICT(firebase_uid) DO UPDATE SET
-               status='pending',available_at=now(),last_error=NULL""",
-            (firebase_uid,),
+            """UPDATE alert_identities
+               SET account_status='pending_deletion',deletion_requested_at=now(),
+                   deletion_scheduled_for=%s,updated_at=now()
+               WHERE phone_uid=%s""",
+            (scheduled_for, phone_uid),
         )
-        _delete_phone_account(connection, phone_uid)
-    try:
-        _delete_firebase_user(firebase_uid)
-        _finish_cleanup(firebase_uid)
-    except Exception as exc:
-        # Application data is already deleted. A worker retries provider cleanup.
-        _finish_cleanup(firebase_uid, exc)
+        connection.execute(
+            "UPDATE user_sessions SET revoked_at=now() WHERE phone_uid=%s AND revoked_at IS NULL",
+            (phone_uid,),
+        )
+        connection.execute(
+            """INSERT INTO firebase_identity_cleanup(firebase_uid,available_at)
+               VALUES (%s,%s) ON CONFLICT(firebase_uid) DO UPDATE SET
+               status='pending',available_at=EXCLUDED.available_at,attempts=0,
+               last_error=NULL,completed_at=NULL""",
+            (firebase_uid, scheduled_for),
+        )
+    return scheduled_for
 
 
 def retry_one_firebase_cleanup() -> bool:
@@ -201,6 +213,13 @@ def retry_one_firebase_cleanup() -> bool:
     firebase_uid = row["firebase_uid"]
     try:
         _delete_firebase_user(firebase_uid)
+        with _postgres_connection() as connection:
+            identity = connection.execute(
+                "SELECT phone_uid FROM alert_identities WHERE firebase_uid=%s FOR UPDATE",
+                (firebase_uid,),
+            ).fetchone()
+            if identity:
+                _delete_phone_account(connection, identity["phone_uid"])
         _finish_cleanup(firebase_uid)
     except Exception as exc:
         _finish_cleanup(firebase_uid, exc)
