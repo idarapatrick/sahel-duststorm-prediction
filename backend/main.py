@@ -13,11 +13,9 @@ from dotenv import load_dotenv
 # intentionally read DATABASE_URL once at process start.
 load_dotenv()
 
-from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_detailed, fetch_features_for_date, fetch_forecast, get_location_name
-from alert_tracker import progressive_predict, get_all_tracked, clear_expired
+from data_pipeline import GEE_AVAILABLE, fetch_current_conditions, fetch_features, fetch_features_for_date, get_location_name
+from alert_tracker import get_all_tracked, clear_expired
 from history_store import RETENTION_DAYS, database_status, query_latest_environmental_evidence, query_recent_snapshots, query_snapshots, save_snapshot
-from monitoring_store import ensure_monitoring_job, record_environmental_evidence
-from prediction_cache import build_cache_key, get_cached_prediction, try_acquire_prediction_lease
 from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
 from rate_limit import RateLimitExceeded, enforce_rate_limit
@@ -31,12 +29,9 @@ from model import (
     CurrentConditionsResponse,
     DailyHorizonPrediction,
     DailyHorizonResponse,
-    ForecastDay,
     FirebaseAccountDeletion,
     FirebaseSessionRequest,
     HistoricalSnapshot,
-    LocationPrediction,
-    MultiDayForecast,
     OtpRequest,
     OtpVerification,
     SubscriptionRequest,
@@ -331,113 +326,6 @@ async def notifications(limit: int = 50, sahelwatch_session: str | None = Cookie
         raise _auth_error(exc) from exc
 
 
-@app.get("/api/v1/predict/location", response_model=LocationPrediction)
-async def predict_location(request: Request, lat: float, lon: float):
-    validate_sahel_point(lat, lon)
-    try:
-        enforce_rate_limit(_request_ip(request) or "unknown", "prediction", 60, 3600)
-    except RateLimitExceeded as exc:
-        raise HTTPException(429, "Prediction request limit reached", headers={"Retry-After": str(exc.retry_after)}) from exc
-
-    request_date = datetime.now(timezone.utc).date()
-    cache_key = build_cache_key(lat, lon, request_date)
-    cached = get_cached_prediction(cache_key)
-    if cached:
-        return LocationPrediction(**cached)
-
-    # The advisory lock is shared by every Render web instance. Requests that
-    # lose the race poll for the winner's response instead of calling the model.
-    lease = None
-    deadline = time.monotonic() + 60
-    while lease is None:
-        lease = try_acquire_prediction_lease(cache_key)
-        if lease is not None:
-            # A prior winner may have populated the cache between our first
-            # read and this lock acquisition.
-            cached = get_cached_prediction(cache_key)
-            if cached:
-                lease.close()
-                return LocationPrediction(**cached)
-            break
-        cached = get_cached_prediction(cache_key)
-        if cached:
-            return LocationPrediction(**cached)
-        if time.monotonic() >= deadline:
-            raise HTTPException(
-                status_code=503,
-                detail="A prediction for this location is already being calculated; retry shortly",
-                headers={"Retry-After": "5"},
-            )
-        await asyncio.sleep(0.25)
-
-    try:
-        try:
-            (atmospheric, surface, prediction_date, provenance), current_conditions = await asyncio.gather(
-                fetch_features_detailed(lat, lon), fetch_current_conditions(lat, lon)
-            )
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        location_name = get_location_name(lat, lon)
-
-        model_started = time.monotonic()
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                HF_SPACE_URL,
-                json={"atmospheric": atmospheric, "surface": surface},
-            )
-        log_event(logger, "model_inference", endpoint="predict/location", status=response.status_code,
-                  duration_ms=round((time.monotonic()-model_started)*1000))
-
-        if response.status_code != 200:
-            raise HTTPException(status_code=502, detail="Model API request failed")
-
-        result = response.json()
-        prediction = LocationPrediction(
-            lat=lat,
-            lon=lon,
-            location_name=location_name,
-            probability=result["probability"],
-            risk_level=result["risk_level"],
-            dust_event=result["dust_event"],
-            prediction_date=prediction_date,
-            data_source="open-meteo+gee" if GEE_AVAILABLE else "open-meteo+satellite-fallback",
-            current_conditions=current_conditions,
-            surface_data={
-                "soil_moisture": round(float(surface[0]), 4),
-                "vegetation_water_content": round(float(surface[1]), 4),
-                "prev_day_aod": round(float(surface[2]), 4),
-            },
-            input_quality={
-                **provenance,
-                "warning": "One or more expected satellite observations were unavailable; fallback model values were used." if provenance["degraded"] else None,
-            },
-        )
-        save_snapshot({
-            "lat": lat, "lon": lon, "location_name": location_name,
-            "target_date": prediction_date, "probability": result["probability"],
-            "alert_level": probability_to_alert(result["probability"]),
-            "dust_event": result["dust_event"], "data_source": "open-meteo+gee" if GEE_AVAILABLE else "open-meteo+satellite-fallback",
-            "metadata": {"risk_level": result["risk_level"], "endpoint": "predict/location", "cache_key": cache_key, "provenance": provenance,
-                         "surface_data": {"soil_moisture": surface[0], "vegetation_water_content": surface[1], "prev_day_aod": surface[2]}},
-        })
-        record_environmental_evidence({
-            "lat": lat,
-            "lon": lon,
-            "location_name": location_name,
-            "prediction_time": datetime.now(timezone.utc).isoformat(),
-            "current_conditions": current_conditions,
-            "surface_data": prediction.surface_data,
-            "input_quality": prediction.input_quality,
-        })
-        ensure_monitoring_job(lat, lon, (datetime.now(timezone.utc) + timedelta(days=1)).date())
-        payload = prediction.model_dump(mode="json")
-        lease.store(payload, lat, lon, request_date)
-        return prediction
-    finally:
-        lease.close()
-
-
 @app.get("/api/v1/conditions/current", response_model=CurrentConditionsResponse)
 async def current_conditions(lat: float, lon: float):
     """Return dashboard weather values without running ML inference."""
@@ -452,102 +340,6 @@ async def current_conditions(lat: float, lon: float):
         location_name=get_location_name(lat, lon),
         current_conditions=conditions,
     )
-
-
-@app.get("/api/v1/forecast", response_model=MultiDayForecast)
-async def forecast(lat: float, lon: float, days: int = 3):
-    validate_sahel_point(lat, lon)
-    if days < 1 or days > 7:
-        raise HTTPException(400, "Days must be between 1 and 7")
-
-    location_name = get_location_name(lat, lon)
-
-    try:
-        forecast_data = await fetch_forecast(lat, lon, days_ahead=days)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    forecast_days = []
-    async with httpx.AsyncClient(timeout=30) as client:
-        for day_data in forecast_data:
-            if "error" in day_data:
-                forecast_days.append(ForecastDay(
-                    date=day_data["date"],
-                    probability=0.0,
-                    risk_level="unavailable",
-                    dust_event=False,
-                ))
-                continue
-
-            response = await client.post(
-                HF_SPACE_URL,
-                json={
-                    "atmospheric": day_data["atmospheric"],
-                    "surface": day_data["surface"],
-                },
-            )
-
-            if response.status_code == 200:
-                result = response.json()
-                forecast_days.append(ForecastDay(
-                    date=day_data["date"],
-                    probability=result["probability"],
-                    risk_level=result["risk_level"],
-                    dust_event=result["dust_event"],
-                ))
-            else:
-                forecast_days.append(ForecastDay(
-                    date=day_data["date"],
-                    probability=0.0,
-                    risk_level="error",
-                    dust_event=False,
-                ))
-
-    return MultiDayForecast(
-        lat=lat,
-        lon=lon,
-        location_name=location_name,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        days=forecast_days,
-    )
-
-
-@app.get("/api/v1/predict/progressive")
-async def predict_progressive(request: Request, lat: float, lon: float, target_date: str = None):
-    """
-    Progressive prediction. Each call uses the latest mix of real
-    observations and forecast data. Call repeatedly as the target
-    date approaches to get progressively more confident predictions.
-    """
-    validate_sahel_point(lat, lon)
-    try:
-        enforce_rate_limit(_request_ip(request) or "unknown", "progressive", 20, 3600)
-    except RateLimitExceeded as exc:
-        raise HTTPException(429, "Progressive prediction limit reached", headers={"Retry-After": str(exc.retry_after)}) from exc
-
-    if target_date is None:
-        target = datetime.now(timezone.utc) + timedelta(days=1)
-    else:
-        try:
-            target = datetime.strptime(target_date, "%Y-%m-%d")
-        except ValueError:
-            raise HTTPException(400, "target_date must be YYYY-MM-DD format")
-
-    try:
-        result = await progressive_predict(lat, lon, target)
-        save_snapshot({
-            "lat": lat, "lon": lon, "location_name": result["location_name"],
-            "target_date": result["target_date"], "recorded_at": result["prediction_time"],
-            "probability": result["probability"], "alert_level": result["alert_level"],
-            "dust_event": result["dust_event"], "data_source": "progressive-open-meteo+gee",
-            "metadata": {"confidence": result["data_composition"]["confidence_pct"], "trend": result["trend"]},
-        })
-        ensure_monitoring_job(lat, lon, target.date())
-        return result
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/v1/alerts/active")

@@ -8,7 +8,8 @@ Supports two modes:
 2. Historical mode: uses past observations for validation and demo
 
 Open-Meteo provides atmospheric forecast data with no authentication required.
-GEE provides SMAP and MODIS data with a 2-7 day lag.
+GEE provides SMAP and MODIS observations with a variable ingestion lag.
+Current CAMS global AOD fills hours where a recent MODIS granule is absent.
 """
 
 import asyncio
@@ -46,6 +47,7 @@ except Exception as exc:
 
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
 OPEN_METEO_VARS = [
     "wind_speed_10m",
@@ -115,6 +117,32 @@ def _fetch_openmeteo_current(lat: float, lon: float) -> dict:
         "soil_moisture": current.get("soil_moisture_0_to_7cm"),
         "source": "open-meteo-current",
     }
+
+
+def _fetch_cams_aod(lat: float, lon: float) -> tuple[float, str | None]:
+    """Return current global CAMS AOD when delayed MODIS data is unavailable."""
+    try:
+        response = requests.get(
+            OPEN_METEO_AIR_QUALITY_URL,
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "aerosol_optical_depth",
+                "domains": "cams_global",
+                "timezone": "UTC",
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        current = response.json().get("current") or {}
+        value = current.get("aerosol_optical_depth")
+        if value is None or float(value) < 0:
+            return 0.0, None
+        observed_at = current.get("time")
+        return float(value), f"{observed_at}:00Z" if observed_at and len(observed_at) == 16 else observed_at
+    except Exception as exc:
+        print(f"CAMS AOD lookup failed for {lat:.3f},{lon:.3f}: {type(exc).__name__}")
+        return 0.0, None
 
 
 async def fetch_current_conditions(lat: float, lon: float) -> dict:
@@ -432,8 +460,8 @@ async def _build_features_with_provenance(lat, lon, date, loop):
 async def build_prediction_inputs(lat, lon, date, loop=None):
     """Build one canonical model payload and return its raw source data.
 
-    This public function is shared by direct, progressive, forecast, and
-    payload-export paths so satellite fallback and provenance behaviour cannot
+    This public function is shared by central monitoring and payload-export
+    paths so satellite fallback and provenance behaviour cannot
     silently diverge between callers.
     """
     loop = loop or asyncio.get_running_loop()
@@ -468,6 +496,7 @@ async def build_prediction_inputs(lat, lon, date, loop=None):
 
     prev_aod = 0.0
     aod_observed_at = None
+    aod_source = None
     if GEE_AVAILABLE:
         for aod_offset in range(1, 8):
             aod_date = date - timedelta(days=aod_offset)
@@ -476,7 +505,14 @@ async def build_prediction_inputs(lat, lon, date, loop=None):
             )
             if prev_aod > 0:
                 aod_observed_at = aod_date.strftime("%Y-%m-%d")
+                aod_source = "modis"
                 break
+    if aod_observed_at is None:
+        prev_aod, aod_observed_at = await loop.run_in_executor(
+            None, _fetch_cams_aod, lat, lon
+        )
+        if aod_observed_at is not None:
+            aod_source = "cams-global"
 
     month = date.month
     month_sin = float(np.sin(2 * np.pi * month / 12))
@@ -488,7 +524,12 @@ async def build_prediction_inputs(lat, lon, date, loop=None):
         "atmospheric": {"source": "open-meteo", "reference_date": date.strftime("%Y-%m-%d"), "available": True},
         "soil_moisture": {"source": sm_source, "observed_at": smap_observed_at, "available": sm is not None},
         "vegetation_water_content": {"source": "smap" if vwc_available else None, "observed_at": smap_observed_at if vwc_available else None, "available": vwc_available},
-        "previous_day_aod": {"source": "modis" if aod_observed_at else None, "observed_at": aod_observed_at, "available": aod_observed_at is not None},
+        "previous_day_aod": {
+            "source": aod_source,
+            "observed_at": aod_observed_at,
+            "available": aod_observed_at is not None,
+            "kind": "satellite-observation" if aod_source == "modis" else "atmospheric-analysis" if aod_source else None,
+        },
     }
     provenance["degraded"] = not all(
         provenance[name]["available"] for name in ("atmospheric", "soil_moisture", "vegetation_water_content", "previous_day_aod")

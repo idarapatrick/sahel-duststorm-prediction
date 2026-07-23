@@ -163,6 +163,7 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
     sm, vwc, prev_aod = surface[:3]
     smap_observed_at = provenance["soil_moisture"]["observed_at"]
     aod_observed_at = provenance["previous_day_aod"]["observed_at"]
+    aod_source = provenance["previous_day_aod"]["source"]
     soil_source = provenance["soil_moisture"]["source"]
     conditions = _current_conditions(raw_data, now, surface)
 
@@ -297,7 +298,12 @@ async def progressive_predict(lat: float, lon: float, target_date: datetime) -> 
             "atmospheric": {"source": "open-meteo", "available": True},
             "soil_moisture": {"source": soil_source, "observed_at": smap_observed_at, "available": True},
             "vegetation_water_content": {"source": "smap" if smap_observed_at else None, "observed_at": smap_observed_at, "available": smap_observed_at is not None},
-            "previous_day_aod": {"source": "modis" if aod_observed_at else None, "observed_at": aod_observed_at, "available": aod_observed_at is not None},
+            "previous_day_aod": {
+                "source": aod_source,
+                "observed_at": aod_observed_at,
+                "available": aod_observed_at is not None,
+                "kind": provenance["previous_day_aod"].get("kind"),
+            },
             "warning": "One or more expected satellite observations were unavailable; fallback model values were used." if smap_observed_at is None or aod_observed_at is None else None,
         },
         "history": history["updates"],

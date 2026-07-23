@@ -23,6 +23,7 @@ class SatelliteFallbackTests(unittest.IsolatedAsyncioTestCase):
             patch.object(data_pipeline, "_extract_soil_moisture", return_value=0.17),
             patch.object(data_pipeline, "_fetch_smap_gee", return_value=(None, None)) as smap,
             patch.object(data_pipeline, "_fetch_modis_aod_gee", return_value=0.0) as modis,
+            patch.object(data_pipeline, "_fetch_cams_aod", return_value=(0.0, None)),
         ):
             _, surface, provenance, _ = await data_pipeline.build_prediction_inputs(
                 13.51, 2.11, target, ImmediateExecutor()
@@ -50,6 +51,7 @@ class SatelliteFallbackTests(unittest.IsolatedAsyncioTestCase):
             patch.object(data_pipeline, "_extract_soil_moisture", return_value=0.17),
             patch.object(data_pipeline, "_fetch_smap_gee", side_effect=smap_values),
             patch.object(data_pipeline, "_fetch_modis_aod_gee", side_effect=aod_values),
+            patch.object(data_pipeline, "_fetch_cams_aod", return_value=(0.0, None)),
         ):
             _, surface, provenance, _ = await data_pipeline.build_prediction_inputs(
                 13.51, 2.11, target, ImmediateExecutor()
@@ -58,6 +60,27 @@ class SatelliteFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(surface[:3], [0.11, 0.42, 0.36])
         self.assertEqual(provenance["soil_moisture"]["observed_at"], "2026-07-19")
         self.assertEqual(provenance["previous_day_aod"]["observed_at"], "2026-07-18")
+        self.assertFalse(provenance["degraded"])
+
+    async def test_current_cams_aod_fills_recent_modis_ingestion_gap(self):
+        target = datetime(2026, 7, 24, tzinfo=timezone.utc)
+        atmospheric = [[0.0] * 7 for _ in range(72)]
+        with (
+            patch.object(data_pipeline, "GEE_AVAILABLE", True),
+            patch.object(data_pipeline, "_fetch_openmeteo_forecast", return_value={"hourly": {}}),
+            patch.object(data_pipeline, "_extract_72h_window", return_value=atmospheric),
+            patch.object(data_pipeline, "_fetch_smap_gee", return_value=(0.12, 0.3)),
+            patch.object(data_pipeline, "_fetch_modis_aod_gee", return_value=0.0),
+            patch.object(data_pipeline, "_fetch_cams_aod", return_value=(0.23, "2026-07-23T00:00:00Z")),
+        ):
+            _, surface, provenance, _ = await data_pipeline.build_prediction_inputs(
+                13.51, 2.11, target, ImmediateExecutor()
+            )
+
+        self.assertEqual(surface[2], 0.23)
+        self.assertEqual(provenance["previous_day_aod"]["source"], "cams-global")
+        self.assertEqual(provenance["previous_day_aod"]["kind"], "atmospheric-analysis")
+        self.assertTrue(provenance["previous_day_aod"]["available"])
         self.assertFalse(provenance["degraded"])
 
 

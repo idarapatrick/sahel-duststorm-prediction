@@ -26,6 +26,7 @@ from history_store import _postgres_connection
 from coverage_store import list_active_forecast_cells
 
 POLL_SECONDS = max(5, int(os.getenv("WORKER_POLL_SECONDS", "30")))
+WORKER_CONCURRENCY = max(1, min(8, int(os.getenv("WORKER_CONCURRENCY", "3"))))
 
 
 def seed_central_jobs() -> None:
@@ -77,9 +78,23 @@ async def process_job(job: dict) -> None:
     )
 
 
+async def process_claimed_job(job: dict) -> None:
+    """Finish one claimed job without terminating the long-running worker."""
+    try:
+        await process_job(job)
+    except Exception as exc:
+        fail_job(str(job["id"]), exc)
+        print(f"Job {job['id']} failed: {type(exc).__name__}: {exc}", flush=True)
+
+
 async def run_forever() -> None:
-    print(f"SahelWatch reinforcement worker started: {WORKER_ID}")
+    print(
+        f"SahelWatch reinforcement worker started: {WORKER_ID} "
+        f"concurrency={WORKER_CONCURRENCY}",
+        flush=True,
+    )
     last_seed = None
+    active: set[asyncio.Task[None]] = set()
     while True:
         try:
             today = datetime.now(timezone.utc).date()
@@ -90,17 +105,22 @@ async def run_forever() -> None:
                     connection.execute("SELECT purge_sahelwatch_expired_data()")
                 last_seed = today
             heartbeat("reinforcement", WORKER_ID, "running")
-            job = claim_due_job()
-            if not job:
+            while len(active) < WORKER_CONCURRENCY:
+                job = claim_due_job()
+                if not job:
+                    break
+                active.add(asyncio.create_task(process_claimed_job(job)))
+            if not active:
                 await asyncio.sleep(POLL_SECONDS)
                 continue
-            try:
-                await process_job(job)
-            except Exception as exc:
-                fail_job(str(job["id"]), exc)
-                print(f"Job {job['id']} failed: {type(exc).__name__}: {exc}")
+            completed, _ = await asyncio.wait(
+                active, timeout=POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED
+            )
+            active.difference_update(completed)
+            for task in completed:
+                task.result()
         except Exception as exc:
-            print(f"Worker loop error: {type(exc).__name__}: {exc}")
+            print(f"Worker loop error: {type(exc).__name__}: {exc}", flush=True)
             await asyncio.sleep(POLL_SECONDS)
 
 

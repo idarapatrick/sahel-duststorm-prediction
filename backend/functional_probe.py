@@ -27,19 +27,21 @@ async def request_prediction(client: httpx.AsyncClient, base_url: str, name: str
     started = time.perf_counter()
     try:
         response = await client.get(
-            f"{base_url}/api/v1/predict/location", params={"lat": lat, "lon": lon}
+            f"{base_url}/api/v1/predictions/latest", params={"lat": lat, "lon": lon}
         )
         elapsed = (time.perf_counter() - started) * 1000
         payload = response.json()
-        quality = payload.get("input_quality") or {}
+        prediction = payload.get("prediction") or {}
+        evidence = payload.get("evidence") or {}
+        quality = (evidence.get("raw_payload") or {}).get("input_quality") or {}
         aod = quality.get("previous_day_aod") or {}
         return ProbeResult(
             case=name,
             status=response.status_code,
             latency_ms=round(elapsed, 1),
-            probability=payload.get("probability"),
+            probability=prediction.get("probability"),
             degraded=quality.get("degraded"),
-            aod_available=aod.get("available"),
+            aod_available=aod.get("available") if aod else (payload.get("current_conditions") or {}).get("aod") is not None,
             error=payload.get("detail") if response.status_code >= 400 else None,
         )
     except Exception as exc:

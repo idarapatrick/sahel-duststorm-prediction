@@ -40,13 +40,25 @@ def list_covered_places(query: str | None = None, country_code: str | None = Non
                       c.centre_lon AS forecast_lon
                FROM covered_places p JOIN forecast_grid_cells c ON c.id=p.forecast_cell_id
                WHERE p.active AND c.active
-                 AND (%s IS NULL OR p.country_code=%s)
-                 AND (%s IS NULL OR p.name ILIKE '%%' || %s || '%%'
-                                  OR p.country ILIKE '%%' || %s || '%%')
+                 AND (%s::text IS NULL OR p.country_code=%s::char(2))
+                 AND (%s::text IS NULL OR p.name ILIKE '%%' || %s::text || '%%'
+                                  OR p.country ILIKE '%%' || %s::text || '%%')
                ORDER BY p.priority,p.country,p.name LIMIT %s""",
             (country_code, country_code, query, query, query, min(max(limit, 1), 500)),
         ).fetchall()
-    return [dict(row) for row in rows]
+    # Return JSON-native values.  UUID objects are accepted by FastAPI when a
+    # response model is present, but this endpoint intentionally returns a
+    # lightweight catalogue without one.
+    places: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["id"] = str(item["id"])
+        item["forecast_lat"] = float(item["forecast_lat"])
+        item["forecast_lon"] = float(item["forecast_lon"])
+        item["lat"] = float(item["lat"])
+        item["lon"] = float(item["lon"])
+        places.append(item)
+    return places
 
 
 def list_active_forecast_cells() -> list[dict[str, Any]]:
