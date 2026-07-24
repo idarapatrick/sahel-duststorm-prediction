@@ -124,7 +124,11 @@ def _conditions_from_evidence(records: list[dict]) -> dict:
         "wind_speed_ms": wind_ms,
         "wind_speed_kmh": round(wind_ms * 3.6, 1) if wind_ms is not None else None,
         "wind_direction_deg": values.get("wind_direction_10m"),
-        "temperature_c": values.get("temperature_2m"),
+        "temperature_c": (
+            round(values["temperature_2m"], 2)
+            if values.get("temperature_2m") is not None
+            else None
+        ),
         "surface_pressure_hpa": values.get("surface_pressure"),
         "precipitation_mm": values.get("precipitation"),
         "dewpoint_c": values.get("dewpoint_2m"),
