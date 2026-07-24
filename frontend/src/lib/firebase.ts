@@ -36,6 +36,11 @@ function phoneAuthError(error: unknown): Error {
 	const code = typeof error === 'object' && error && 'code' in error
 		? String((error as { code?: unknown }).code)
 		: '';
+	console.error('Firebase phone verification failed', {
+		code: code || 'unknown',
+		projectId: env.PUBLIC_FIREBASE_PROJECT_ID || 'not-configured',
+		authDomain: env.PUBLIC_FIREBASE_AUTH_DOMAIN || 'not-configured'
+	});
 	const messages: Record<string, string> = {
 		'auth/app-not-authorized': 'Phone verification is not authorised for this website.',
 		'auth/billing-not-enabled': 'Real SMS verification requires Firebase billing to be enabled.',
@@ -43,7 +48,7 @@ function phoneAuthError(error: unknown): Error {
 		'auth/invalid-app-credential': 'The website security check has expired. Refresh the page and try again.',
 		'auth/invalid-phone-number': 'Enter a valid international phone number beginning with + and the country code.',
 		'auth/missing-phone-number': 'Enter the phone number that should receive the verification code.',
-		'auth/operation-not-allowed': 'Phone verification is not enabled for this Firebase project.',
+		'auth/operation-not-allowed': 'The deployed Firebase configuration rejected phone verification. Please check that this app is connected to the project where Phone sign-in is enabled.',
 		'auth/quota-exceeded': 'The SMS verification limit has been reached. Please try again later.',
 		'auth/too-many-requests': 'Too many verification attempts were made. Please wait before trying again.',
 		'auth/code-expired': 'This verification code has expired. Request a new code.',
