@@ -28,6 +28,30 @@ function auth() {
 
 let verifier: RecaptchaVerifier | null = null;
 
+/**
+ * Convert Firebase phone-auth failures into guidance that is useful to
+ * SahelWatch users and deployment maintainers without exposing provider detail.
+ */
+function phoneAuthError(error: unknown): Error {
+	const code = typeof error === 'object' && error && 'code' in error
+		? String((error as { code?: unknown }).code)
+		: '';
+	const messages: Record<string, string> = {
+		'auth/app-not-authorized': 'Phone verification is not authorised for this website.',
+		'auth/billing-not-enabled': 'Real SMS verification requires Firebase billing to be enabled.',
+		'auth/captcha-check-failed': 'The security check could not be completed. Refresh the page and try again.',
+		'auth/invalid-app-credential': 'The website security check has expired. Refresh the page and try again.',
+		'auth/invalid-phone-number': 'Enter a valid international phone number beginning with + and the country code.',
+		'auth/missing-phone-number': 'Enter the phone number that should receive the verification code.',
+		'auth/operation-not-allowed': 'Phone verification is not enabled for this Firebase project.',
+		'auth/quota-exceeded': 'The SMS verification limit has been reached. Please try again later.',
+		'auth/too-many-requests': 'Too many verification attempts were made. Please wait before trying again.',
+		'auth/code-expired': 'This verification code has expired. Request a new code.',
+		'auth/invalid-verification-code': 'The verification code is incorrect.'
+	};
+	return new Error(messages[code] || 'The verification message could not be sent. Please try again.');
+}
+
 export async function startFirebasePhoneVerification(phone: string, containerId: string): Promise<ConfirmationResult> {
 	verifier?.clear();
 	verifier = new RecaptchaVerifier(auth(), containerId, { size: 'invisible' });
@@ -35,13 +59,17 @@ export async function startFirebasePhoneVerification(phone: string, containerId:
 		return await signInWithPhoneNumber(auth(), phone, verifier);
 	} catch (error) {
 		verifier.clear(); verifier = null;
-		throw error;
+		throw phoneAuthError(error);
 	}
 }
 
 export async function finishFirebasePhoneVerification(confirmation: ConfirmationResult, code: string) {
-	const credential = await confirmation.confirm(code);
-	return { idToken: await credential.user.getIdToken(true), phone: credential.user.phoneNumber };
+	try {
+		const credential = await confirmation.confirm(code);
+		return { idToken: await credential.user.getIdToken(true), phone: credential.user.phoneNumber };
+	} catch (error) {
+		throw phoneAuthError(error);
+	}
 }
 
 export async function signOutFirebase() {
