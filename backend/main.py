@@ -18,7 +18,7 @@ from alert_tracker import get_all_tracked, clear_expired
 from history_store import RETENTION_DAYS, database_status, query_latest_outlooks, query_latest_prediction_bundle, query_recent_snapshots, query_snapshots, save_snapshot
 from evidence_store import query_snapshot_evidence, query_snapshots_evidence
 from monitoring_store import prediction_schedule
-from auth_store import AuthError, confirm_account_deletion, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
+from auth_store import AuthError, account_exists, confirm_account_deletion, normalize_phone, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
 from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
 from rate_limit import RateLimitExceeded, enforce_rate_limit
 from observability import configure_logging, log_event
@@ -37,6 +37,7 @@ from model import (
     HistoricalSnapshot,
     OtpRequest,
     OtpVerification,
+    PhoneAccountStatusRequest,
     SubscriptionRequest,
 )
 
@@ -242,6 +243,30 @@ async def auth_firebase_session(payload: FirebaseSessionRequest, request: Reques
         "authenticated": True, "phone_uid": result["phone_uid"],
         "firebase_uid": result["firebase_uid"], "expires_at": result["expires_at"].isoformat(),
     }
+
+
+@app.post("/api/v1/auth/phone/account-status")
+async def auth_phone_account_status(payload: PhoneAccountStatusRequest, request: Request):
+    """Validate signup or login intent before Firebase sends an SMS code."""
+    if payload.purpose not in {"signup", "login"}:
+        raise HTTPException(400, "purpose must be signup or login")
+    try:
+        enforce_rate_limit(_request_ip(request) or "unknown", "phone-account-status", 20, 3600)
+        phone_uid = normalize_phone(payload.phone)
+        exists = account_exists(phone_uid)
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            429,
+            "Too many phone-account checks",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    except AuthError as exc:
+        raise _auth_error(exc) from exc
+    if payload.purpose == "signup" and exists:
+        raise HTTPException(409, "This number is already linked. Log in instead.")
+    if payload.purpose == "login" and not exists:
+        raise HTTPException(404, "No SahelWatch account uses this number. Create an account instead.")
+    return {"available": not exists, "account_exists": exists, "purpose": payload.purpose}
 
 
 @app.post("/api/v1/auth/firebase/account/delete")

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import { ArrowLeft, ArrowRight, Check, LocateFixed, MessageSquare, Phone, Search, ShieldCheck, X } from 'lucide-svelte';
-	import { createFirebaseSession, getNearestCoveredLocation, requestOtp, verifyOtp } from '$lib/api';
+	import { checkPhoneAccount, createFirebaseSession, getNearestCoveredLocation, requestOtp, verifyOtp } from '$lib/api';
 	import { firebaseAuthEnabled, finishFirebasePhoneVerification, legacyPhoneAuthEnabled, startFirebasePhoneVerification } from '$lib/firebase';
 	import type { ConfirmationResult } from 'firebase/auth';
 	import { DEFAULT_LOCATION, SAHEL_BOUNDS } from '$lib/locations';
@@ -54,7 +54,10 @@
 		if (!phoneValid) { message = 'Use international format starting with +, for example +2348012345678.'; return; }
 		busy = true; message = '';
 		try {
-			if (firebaseAuthEnabled()) firebaseConfirmation = await startFirebasePhoneVerification(phone, 'firebase-recaptcha');
+			if (firebaseAuthEnabled()) {
+				await checkPhoneAccount(phone, purpose);
+				firebaseConfirmation = await startFirebasePhoneVerification(phone, 'firebase-recaptcha');
+			}
 			else if (legacyPhoneAuthEnabled()) { const result = await requestOtp(phone, purpose, deviceId); challengeId = result.challenge_id; }
 			else throw new Error('Phone verification is not ready on this deployment. The Firebase web settings must be added in Vercel, then the frontend must be redeployed.');
 			step = 'otp';

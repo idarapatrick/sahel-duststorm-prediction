@@ -94,6 +94,12 @@ class OtpRequest(BaseModel):
     device_id: str | None = None
 
 
+class PhoneAccountStatusRequest(BaseModel):
+    """Phone number checked before Firebase sends a signup or login OTP."""
+    phone: str
+    purpose: str
+
+
 class PreferredLocation(BaseModel):
     """User-selected forecast location stored with a phone account."""
     name: str

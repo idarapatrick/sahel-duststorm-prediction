@@ -87,6 +87,10 @@ export async function createFirebaseSession(idToken: string, purpose: 'signup' |
 	});
 }
 
+export async function checkPhoneAccount(phone: string, purpose: 'signup' | 'login') {
+	return postJson('/api/v1/auth/phone/account-status', { phone, purpose });
+}
+
 export async function deleteFirebaseAccount(idToken: string) {
 	return postJson('/api/v1/auth/firebase/account/delete', { id_token: idToken });
 }

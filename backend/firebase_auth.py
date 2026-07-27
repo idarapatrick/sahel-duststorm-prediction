@@ -95,7 +95,7 @@ def create_firebase_session(
         if by_phone and by_phone["account_status"] == "pending_deletion":
             scheduled = by_phone["deletion_scheduled_for"].isoformat()
             raise AuthError(409, f"This account is scheduled for deletion on {scheduled}")
-        if purpose == "signup" and exists and by_phone["firebase_uid"] not in {None, firebase_uid}:
+        if purpose == "signup" and exists:
             raise AuthError(409, "This number is already linked. Log in instead.")
         if purpose == "login" and not exists:
             raise AuthError(404, "No SahelWatch account uses this number. Create an account instead.")
