@@ -18,6 +18,7 @@
 	let userNotifications: any[] = [];
 	let alertThreshold: 'watch' | 'warning' | 'alert' = 'warning';
 	let settingsBusy = false;
+	let showLogoutConfirm = false;
 	let showDeleteConfirm = false;
 	let deleteError = '';
 	let deleteChallengeId = '';
@@ -252,10 +253,21 @@
 		loadAlerts();
 	}
 	async function updateSubscription() {
-		settingsBusy = true; phoneMessage = '';
-		try { await saveAlertSubscription(selected, alertThreshold); phoneMessageType = 'success'; phoneMessage = `SMS alerts saved for ${selected.name} at ${alertThreshold} level.`; }
+		if (settingsBusy || !linkedPhone) return;
+		const phoneBeforeSave = linkedPhone;
+		settingsBusy = true; phoneMessage = ''; activeTab = 'settings';
+		try {
+			await saveAlertSubscription(selected, alertThreshold);
+			linkedPhone = phoneBeforeSave;
+			authState = { ...authState, authenticated: true };
+			phoneMessageType = 'success';
+			phoneMessage = `SMS alerts saved for ${selected.name} at ${alertThreshold} level.`;
+		}
 		catch (error) { phoneMessageType = 'error'; phoneMessage = error instanceof Error ? error.message : 'Could not save alert preference.'; }
-		finally { settingsBusy = false; }
+		finally {
+			activeTab = 'settings';
+			settingsBusy = false;
+		}
 	}
 	async function sendDeleteCode() {
 		settingsBusy = true; deleteError = '';
@@ -286,8 +298,28 @@
 		showDeleteConfirm = false; deleteStep = 'confirm'; deleteCode = ''; deleteChallengeId = ''; deleteFirebaseConfirmation = null; deleteError = '';
 	}
 
-	async function signOut() {
-		await logout(); await signOutFirebase().catch(() => {}); authState = { authenticated: false }; linkedPhone = ''; phoneMessageType = 'info'; phoneMessage = 'You are logged out. SMS alerts are disabled on this device.';
+	function clearBrowserAppState() {
+		for (const key of Object.keys(localStorage)) {
+			if (key.startsWith('sahelwatch:')) localStorage.removeItem(key);
+		}
+		for (const key of Object.keys(sessionStorage)) {
+			if (key.startsWith('sahelwatch:')) sessionStorage.removeItem(key);
+		}
+	}
+	async function confirmLogout() {
+		if (settingsBusy) return;
+		settingsBusy = true;
+		try {
+			await logout().catch(() => {});
+			await signOutFirebase().catch(() => {});
+			clearBrowserAppState();
+			authState = { authenticated: false };
+			linkedPhone = '';
+			showLogoutConfirm = false;
+			window.location.assign('/');
+		} finally {
+			settingsBusy = false;
+		}
 	}
 	async function resetBrowserData() {
 		const confirmed = window.confirm(
@@ -298,12 +330,7 @@
 		try {
 			await logout().catch(() => {});
 			await signOutFirebase().catch(() => {});
-			for (const key of Object.keys(localStorage)) {
-				if (key.startsWith('sahelwatch:')) localStorage.removeItem(key);
-			}
-			for (const key of Object.keys(sessionStorage)) {
-				if (key.startsWith('sahelwatch:')) sessionStorage.removeItem(key);
-			}
+			clearBrowserAppState();
 			window.location.assign('/');
 		} finally {
 			settingsBusy = false;
@@ -369,6 +396,19 @@
 	<OnboardingFlow {deviceId} {locations} initialLocation={selected} {coverageLoading} {coverageError} on:retryCoverage={loadCoverage} on:complete={finishOnboarding}/>
 {/if}
 {#if showAuth}<OnboardingFlow {deviceId} {locations} initialLocation={selected} authOnly {coverageLoading} {coverageError} on:retryCoverage={loadCoverage} on:complete={finishOnboarding} on:close={() => showAuth=false}/>{/if}
+{#if showLogoutConfirm}
+	<div class="modal-scrim">
+		<section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="logout-title" aria-describedby="logout-description">
+			<span class="confirm-icon logout-icon"><RotateCcw size={22}/></span>
+			<h2 id="logout-title">Log out and reset this app?</h2>
+			<p id="logout-description">You will be signed out and returned to the first-time setup screen. Your SahelWatch account and saved SMS preferences will not be deleted.</p>
+			<div>
+				<button type="button" class="secondary" disabled={settingsBusy} on:click={() => showLogoutConfirm = false}>Stay logged in</button>
+				<button type="button" class="logout-confirm" disabled={settingsBusy} on:click={confirmLogout}>{settingsBusy ? 'Logging out...' : 'Log out and reset'}</button>
+			</div>
+		</section>
+	</div>
+{/if}
 {#if showDeleteConfirm}<div class="modal-scrim"><section class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><span class="confirm-icon"><Trash2 size={22}/></span>{#if deleteStep === 'confirm'}<h2 id="delete-title">Delete your phone account?</h2><p id="delete-description">SMS alerts and sign-ins will stop immediately. Your phone account and alert choices will be permanently removed after seven days. We will send a code to +{linkedPhone} first.</p><div id="delete-firebase-recaptcha"></div>{:else}<h2 id="delete-title">Enter the code from your phone</h2><p id="delete-description">Enter the six-digit code sent to +{linkedPhone}. After verification, the account will be deactivated and scheduled for removal in seven days.</p><label for="delete-code">Verification code</label><input id="delete-code" class="delete-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" bind:value={deleteCode} placeholder="000000" />{/if}{#if deleteError}<p class="delete-error" role="alert">{deleteError}</p>{/if}<div><button class="secondary" disabled={settingsBusy} on:click={closeDeleteDialog}>Keep account</button>{#if deleteStep === 'confirm'}<button class="delete-confirm" disabled={settingsBusy} on:click={sendDeleteCode}>{settingsBusy ? 'Sending code...' : 'Send code'}</button>{:else}<button class="delete-confirm" disabled={settingsBusy || deleteCode.length !== 6} on:click={removeAccount}>{settingsBusy ? 'Scheduling...' : 'Verify and schedule deletion'}</button>{/if}</div></section></div>{/if}
 
 <div class="app-shell">
@@ -539,7 +579,7 @@
 		{:else}
 			<section class="utility-page settings-page">
 				<div class="subpage-head"><div><p class="eyebrow">Personalisation</p><h1>Settings</h1><p>Your phone number is the only personal information SahelWatch needs.</p></div></div>
-				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is linked securely to your account. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button class="danger" on:click={signOut}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button class="primary account-switch" disabled={settingsBusy} on:click={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button>{#if phoneMessage}<p class:error={phoneMessageType === 'error'} class="form-message" role={phoneMessageType === 'error' ? 'alert' : 'status'} aria-live="polite"><ShieldCheck size={17}/><span>{phoneMessage}</span></p>{/if}<button class="secondary account-switch" on:click={async () => { await signOut(); showAuth=true; }}>Log in with another number</button>{:else}<button class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{#if phoneMessage}<p class:error={phoneMessageType === 'error'} class="form-message" role={phoneMessageType === 'error' ? 'alert' : 'status'} aria-live="polite"><ShieldCheck size={17}/><span>{phoneMessage}</span></p>{/if}{/if}</section>
+				<section class="settings-card glass"><div class="settings-title"><span><Phone size={21}/></span><div><h2>Phone account & SMS alerts</h2><p>A verified international number is linked securely to your account. Phone linking is optional, but SMS alerts require it.</p></div></div>{#if linkedPhone}<div class="linked"><ShieldCheck size={18}/><span>+{linkedPhone}</span><button type="button" class="danger" on:click={() => showLogoutConfirm = true}>Log out</button></div><label class="threshold-field"><span>Alert threshold for {selected.name}</span><select bind:value={alertThreshold}><option value="watch">Watch and above</option><option value="warning">Warning and above</option><option value="alert">Alert only</option></select></label><button type="button" class="primary account-switch" disabled={settingsBusy} on:click|preventDefault|stopPropagation={updateSubscription}>{settingsBusy ? 'Saving…' : 'Save SMS preference'}</button>{#if phoneMessage}<p class:error={phoneMessageType === 'error'} class="form-message" role={phoneMessageType === 'error' ? 'alert' : 'status'} aria-live="polite"><ShieldCheck size={17}/><span>{phoneMessage}</span></p>{/if}<button type="button" class="secondary account-switch" on:click={() => showLogoutConfirm = true}>Log out and use another number</button>{:else}<button type="button" class="primary account-link" on:click={() => showAuth=true}>Link phone or log in</button>{#if phoneMessage}<p class:error={phoneMessageType === 'error'} class="form-message" role={phoneMessageType === 'error' ? 'alert' : 'status'} aria-live="polite"><ShieldCheck size={17}/><span>{phoneMessage}</span></p>{/if}{/if}</section>
 					<section class="legal glass"><a href="/privacy">Privacy policy <ArrowRight size={17}/></a><a href="/terms">Terms of use <ArrowRight size={17}/></a><div class="reset-copy"><strong>Reset this browser</strong><p>Clear SahelWatch preferences and show first-time setup again. This does not delete your account or change your public IP address.</p></div><button class="reset-row" disabled={settingsBusy} on:click={resetBrowserData}><RotateCcw size={17}/>Reset app data</button>{#if authState.authenticated}<button class="danger-row" disabled={settingsBusy} on:click={() => { deleteError=''; deleteStep='confirm'; showDeleteConfirm=true; }}><Trash2 size={17}/>Delete account and alert records</button>{/if}</section>
 			</section>
 		{/if}
@@ -548,7 +588,7 @@
 </div>
 
 <style>
-	.modal-scrim{position:fixed;z-index:1200;inset:0;padding:20px;display:grid;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(12px)}.confirm-card{width:min(440px,100%);padding:28px;border:1px solid var(--border);border-radius:28px;color:var(--text);background:var(--surface-solid);box-shadow:var(--shadow-lg)}.confirm-icon{width:48px;height:48px;display:grid;place-items:center;border-radius:16px;color:var(--red);background:color-mix(in srgb,var(--red) 12%,transparent)}.confirm-card h2{margin:18px 0 10px}.confirm-card p{color:var(--text-secondary);line-height:1.6}.confirm-card .delete-error{padding:10px 12px;border-radius:12px;color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent)}.confirm-card>div{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:10px}.confirm-card button{min-height:48px;border:0;border-radius:15px;font-weight:700;cursor:pointer}.delete-confirm{color:white;background:var(--red)}
+	.modal-scrim{position:fixed;z-index:1200;inset:0;padding:20px;display:grid;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(12px)}.confirm-card{width:min(440px,100%);padding:28px;border:1px solid var(--border);border-radius:28px;color:var(--text);background:var(--surface-solid);box-shadow:var(--shadow-lg)}.confirm-icon{width:48px;height:48px;display:grid;place-items:center;border-radius:16px;color:var(--red);background:color-mix(in srgb,var(--red) 12%,transparent)}.confirm-icon.logout-icon{color:var(--blue);background:color-mix(in srgb,var(--blue) 12%,transparent)}.confirm-card h2{margin:18px 0 10px}.confirm-card p{color:var(--text-secondary);line-height:1.6}.confirm-card .delete-error{padding:10px 12px;border-radius:12px;color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent)}.confirm-card>div{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:10px}.confirm-card button{min-height:48px;border:0;border-radius:15px;font-weight:700;cursor:pointer}.delete-confirm{color:white;background:var(--red)}.logout-confirm{color:var(--on-brand);background:var(--blue)}
 	.critical-banner{position:sticky;z-index:40;top:8px;margin-bottom:8px;padding:12px 16px;display:flex;align-items:center;gap:10px;border-radius:16px;color:white;background:var(--red);box-shadow:var(--shadow-md)}.critical-banner button{margin-left:auto;min-height:44px;padding:0 14px;border:1px solid rgba(255,255,255,.45);border-radius:14px;color:white;background:rgba(255,255,255,.12);cursor:pointer}.threshold-field{margin-top:20px;display:grid;gap:8px;color:var(--text-secondary);font-size:.8rem;font-weight:600}.threshold-field select{min-height:48px;padding:0 14px;border:1px solid var(--border);border-radius:14px;color:var(--text);background:var(--surface-solid)}.map-loading{height:100%;display:grid;place-items:center;color:var(--text-secondary)}
 	.splash{position:fixed;z-index:1100;inset:0;display:grid;place-content:center;justify-items:center;background:linear-gradient(rgba(7,12,25,.44),rgba(8,13,27,.62)),url('/sahel-liquid-backdrop-v3.png') center/cover;color:white}.splash span{width:74px;height:74px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.55);border-radius:24px;color:var(--on-brand);background:linear-gradient(145deg,#759fc6,var(--brand-strong));box-shadow:0 22px 56px color-mix(in srgb,var(--blue) 38%,transparent),inset 0 1px rgba(255,255,255,.6)}.splash strong{margin-top:18px;font-size:1.55rem;letter-spacing:-.04em}.splash small{margin-top:6px;color:rgba(255,255,255,.72)}
 	.app-shell { width: min(1480px, calc(100% - 28px)); margin: 0 auto; padding: 14px 0 28px; }
