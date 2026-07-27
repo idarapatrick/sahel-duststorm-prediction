@@ -69,7 +69,9 @@ function phoneAuthError(error: unknown): Error {
 
 export async function startFirebasePhoneVerification(phone: string, containerId: string): Promise<ConfirmationResult> {
 	verifier?.clear();
-	verifier = new RecaptchaVerifier(auth(), containerId, { size: 'invisible' });
+	// A visible challenge makes phone verification understandable and gives
+	// privacy-focused browsers an explicit opportunity to complete reCAPTCHA.
+	verifier = new RecaptchaVerifier(auth(), containerId, { size: 'normal' });
 	try {
 		return await signInWithPhoneNumber(auth(), phone, verifier);
 	} catch (error) {
