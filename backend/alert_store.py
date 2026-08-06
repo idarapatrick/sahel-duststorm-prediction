@@ -71,6 +71,12 @@ def notification_feed(phone_uid: str, limit: int = 50) -> list[dict[str, Any]]:
                ORDER BY e.created_at DESC LIMIT %s""",
             (phone_uid, limit),
         ).fetchall()
+        account_rows = connection.execute(
+            """SELECT id,event_type,title,message,device_label,location_name,
+                      acknowledged_at,reported_at,created_at FROM account_notifications
+               WHERE phone_uid=%s ORDER BY created_at DESC LIMIT %s""",
+            (phone_uid, limit),
+        ).fetchall()
     items = []
     for row in rows:
         payload = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
@@ -80,7 +86,45 @@ def notification_feed(phone_uid: str, limit: int = 50) -> list[dict[str, Any]]:
             "id": str(row["id"]), "event_type": row["event_type"], "status": row["status"],
             "created_at": row["created_at"].isoformat(), **payload,
         })
-    return items
+    items.extend({
+        "id": str(row["id"]), "event_type": row["event_type"],
+        "title": row["title"], "message": row["message"],
+        "device_label": row["device_label"], "location_name": row["location_name"],
+        "acknowledged_at": row["acknowledged_at"].isoformat() if row["acknowledged_at"] else None,
+        "reported_at": row["reported_at"].isoformat() if row["reported_at"] else None,
+        "status": "recorded", "created_at": row["created_at"].isoformat(),
+    } for row in account_rows)
+    return sorted(items, key=lambda item: item["created_at"], reverse=True)[:limit]
+
+
+def respond_to_account_notification(phone_uid: str, notification_id: str, action: str) -> dict[str, Any]:
+    """Acknowledge a sign-in or revoke the session associated with an unknown sign-in."""
+    if action not in {"confirm", "report"}:
+        raise ValueError("action must be confirm or report")
+    with _postgres_connection() as connection:
+        row = connection.execute(
+            """SELECT id,session_token_hash FROM account_notifications
+               WHERE id=%s AND phone_uid=%s FOR UPDATE""",
+            (notification_id, phone_uid),
+        ).fetchone()
+        if not row:
+            raise LookupError("Account notification not found")
+        if action == "confirm":
+            connection.execute(
+                "UPDATE account_notifications SET acknowledged_at=now() WHERE id=%s",
+                (notification_id,),
+            )
+        else:
+            connection.execute(
+                "UPDATE account_notifications SET reported_at=now() WHERE id=%s",
+                (notification_id,),
+            )
+            if row["session_token_hash"]:
+                connection.execute(
+                    "UPDATE user_sessions SET revoked_at=now() WHERE token_hash=%s",
+                    (row["session_token_hash"],),
+                )
+    return {"id": notification_id, "action": action, "recorded": True}
 
 
 def heartbeat(worker_name: str, worker_id: str, status: str, metadata: dict | None = None) -> None:

@@ -3,8 +3,10 @@
 	import { Activity, ArrowRight, Bell, CalendarDays, Clock3, Droplets, Gauge, Info, Map, Navigation, Phone, RotateCcw, Settings, ShieldCheck, Sparkles, Thermometer, Trash2, Wind } from 'lucide-svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import OnboardingFlow from '$lib/components/OnboardingFlow.svelte';
+	import HistoryTrend from '$lib/components/HistoryTrend.svelte';
+	import { NEIGHBOURING_COUNTRIES } from '$lib/sahelCountries';
 	import { DEFAULT_LOCATION, locations as fallbackLocations } from '$lib/locations';
-	import { ApiRequestError, confirmAccountDeletion, deleteFirebaseAccount, demoPrediction, getActiveAlerts, getAuthState, getCoveredLocations, getHistory, getLatestPrediction, getNotifications, getRecentHistory, logout, requestAccountDeletionOtp, saveAlertSubscription } from '$lib/api';
+	import { ApiRequestError, confirmAccountDeletion, deleteFirebaseAccount, demoPrediction, getActiveAlerts, getAuthState, getCoveredLocations, getHistory, getLatestPrediction, getNotifications, getRecentHistory, logout, requestAccountDeletionOtp, respondToAccountNotification, saveAlertSubscription } from '$lib/api';
 	import { finishFirebasePhoneVerification, signOutFirebase, startFirebasePhoneVerification } from '$lib/firebase';
 	import type { ConfirmationResult } from 'firebase/auth';
 	import type { ActiveAlert, AuthState, HistoricalSnapshot, Location, Prediction } from '$lib/types';
@@ -16,6 +18,7 @@
 	let recentHistory: HistoricalSnapshot[] = [];
 	let activeAlerts: ActiveAlert[] = [];
 	let userNotifications: any[] = [];
+	let showNotificationDrawer = false;
 	let alertThreshold: 'watch' | 'warning' | 'alert' = 'warning';
 	let settingsBusy = false;
 	let showLogoutConfirm = false;
@@ -45,6 +48,8 @@
 	let coverageError = '';
 	let historyLoading = false;
 	let historyMessage = '';
+	let showRecentHistory = false;
+	let alertScope: 'location' | 'neighbours' | 'sahel' = 'location';
 	let activeTab: 'overview' | 'tracking' | 'history' | 'notifications' | 'settings' = 'overview';
 	let searchDate = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
 	const today = new Date().toISOString().slice(0, 10);
@@ -119,6 +124,34 @@
 	$: forecastEvidencePercent = availableDayEvidence.length
 		? Math.round((forecastEvidenceCount / availableDayEvidence.length) * 100)
 		: 0;
+	$: relevantCountries = NEIGHBOURING_COUNTRIES[selected.country] ?? [selected.country];
+	$: nearbyAlerts = activeAlerts.filter((alert) => {
+		const country = alert.locationName.split(',').at(-1)?.trim() ?? '';
+		return relevantCountries.includes(country);
+	});
+	$: accountNotifications = userNotifications.filter((item) => item.event_type?.startsWith('account.'));
+	$: riskNotifications = userNotifications.filter((item) => item.event_type === 'prediction.alert_level_changed');
+	$: allAlertItems = activeAlerts.flatMap((alert) => alert.updates.map((update) => ({ ...update, locationName: alert.locationName })))
+		.filter((item) => item.alertLevel === 'alert' && item.probability >= 0.7)
+		.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+	$: scopedAlertItems = (() => {
+		const selectedNeighbours = relevantCountries.filter((country) => country !== selected.country);
+		const filtered = allAlertItems.filter((item) => {
+			const [place, country = ''] = item.locationName.split(',').map((part) => part.trim());
+			if (alertScope === 'location') return place === selected.name && country === selected.country;
+			if (alertScope === 'neighbours') return selectedNeighbours.includes(country);
+			return true;
+		});
+		if (alertScope !== 'sahel') return filtered.slice(0, 6);
+		const counts = new globalThis.Map<string, number>();
+		return filtered.filter((item) => {
+			const country = item.locationName.split(',').at(-1)?.trim() ?? '';
+			const count = counts.get(country) ?? 0;
+			if (count >= 3) return false;
+			counts.set(country, count + 1);
+			return true;
+		});
+	})();
 
 	function windExplanation(speed: number | null | undefined) {
 		if (speed == null) return 'No verified wind reading for this update';
@@ -218,6 +251,15 @@
 	async function loadAlerts() {
 		try { activeAlerts = await getActiveAlerts(); } catch { activeAlerts = []; }
 		if (authState.authenticated) { try { userNotifications = await getNotifications(); } catch { userNotifications = []; } }
+	}
+	async function respondToSignIn(id: string, action: 'confirm' | 'report') {
+		try {
+			await respondToAccountNotification(id, action);
+			await loadAlerts();
+		} catch {
+			phoneMessage = 'The security response could not be saved. Please try again.';
+			phoneMessageType = 'error';
+		}
 	}
 	async function loadCoverage() {
 		coverageLoading = true;
@@ -413,7 +455,24 @@
 
 <div class="app-shell">
 	{#if predictionLoadState === 'ready' && prediction.available !== false && probability >= 70}<div class="critical-banner" role="alert"><Bell size={18}/><strong>High dust risk for {selected.name}: {probability}%.</strong><button on:click={() => activeTab='tracking'}>View tracking</button></div>{/if}
-	<AppHeader bind:selected {locations} {online} on:select={(e) => loadLocation(e.detail)} on:theme={(e) => darkTheme = e.detail === 'dark'} />
+	<AppHeader bind:selected {locations} {online} unreadNotifications={accountNotifications.length} on:notifications={() => { showNotificationDrawer = true; loadAlerts(); }} on:select={(e) => loadLocation(e.detail)} on:theme={(e) => darkTheme = e.detail === 'dark'} />
+	{#if showNotificationDrawer}
+		<div class="drawer-scrim">
+			<button class="drawer-backdrop" aria-label="Close notifications" on:click={() => showNotificationDrawer=false}></button>
+			<aside class="notification-drawer glass" role="dialog" aria-modal="true" aria-labelledby="notification-title">
+				<div class="drawer-head"><div><p class="eyebrow">Account activity</p><h2 id="notification-title">Notifications</h2></div><button aria-label="Close notifications" on:click={() => showNotificationDrawer=false}>×</button></div>
+				{#if !authState.authenticated}
+					<div class="drawer-empty"><Bell size={26}/><strong>Phone account not linked</strong><p>Sign in with a verified number to receive account-security notifications across devices.</p></div>
+				{:else}
+					{#each accountNotifications as item}
+						<article class="activity-note"><span><ShieldCheck size={18}/></span><div><strong>{item.title}</strong><p>{item.message}{item.location_name ? ` Forecast area: ${item.location_name}.` : ''}</p><small>{new Date(item.created_at).toLocaleString()}</small>{#if item.event_type === 'account.login' && !item.acknowledged_at && !item.reported_at}<div class="activity-actions"><button on:click={() => respondToSignIn(item.id, 'confirm')}>This was me</button><button class="danger" on:click={() => respondToSignIn(item.id, 'report')}>Not me</button></div>{:else if item.acknowledged_at}<em>Sign-in confirmed</em>{:else if item.reported_at}<em>Session revoked</em>{/if}</div></article>
+					{:else}
+						<div class="drawer-empty"><Bell size={26}/><strong>No account activity yet</strong><p>New sign-ins and security updates will appear here.</p></div>
+					{/each}
+				{/if}
+			</aside>
+		</div>
+	{/if}
 
 	<nav class="tabs glass" aria-label="Primary navigation">
 		<button class:active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}><Activity size={17}/>Overview</button>
@@ -522,7 +581,6 @@
 				<article class="glass"><span class="metric-icon"><Gauge size={20}/></span><div><p>Particles in the air (AOD)</p><strong>{aodAvailable && aodValue != null ? aodValue.toFixed(2) : 'Unavailable'}</strong><small>{aodAvailable ? aodExplanation(aodValue) : 'No verified AOD reading for this update'}{#if aodAvailable}<span>{aodDescription}</span>{/if}</small></div></article>
 			</section>
 
-			{#if confirmedMissingReadings.length > 0}<div class="data-warning" role="status"><Info size={18}/><p><strong>Confirmed missing reading:</strong> {confirmedMissingMessage} SahelWatch used the available readings and will check again during the next central update.</p></div>{/if}
 			<section class="explanation glass">
 				<span class="explanation-icon"><Sparkles size={22}/></span><div><p class="eyebrow">What this means</p><h2>Dust outlook for {selected.name} on {selectedTargetDate}</h2><p>This outlook updates automatically when newer environmental information becomes available.</p><small>{activePrediction.evidenceSummary ? `${Math.round(activePrediction.evidenceSummary.inputCompleteness * 100)}% of expected inputs were available. Of the available values, ${recordedEvidencePercent}% came from recorded or analysed conditions and ${forecastEvidencePercent}% came from forecasts.` : 'Weather details are shown only when verified source information is available.'}</small></div>
 			</section>
@@ -554,7 +612,7 @@
 		{:else if activeTab === 'history'}
 			<section class="history-page">
 				<div class="subpage-head"><div><p class="eyebrow">90-day archive</p><h1>Look back with context</h1><p>Search prediction snapshots that SahelWatch actually recorded. Conditions are never reconstructed or invented.</p></div></div>
-				{#if recentHistory.length}<div class="recent-history"><p class="eyebrow">Last 10 predictions for {selected.name}</p>{#each recentHistory as item}<article class="history-result glass"><div><strong>{new Date(item.recordedAt).toLocaleString()}</strong><p>Target {item.targetDate}</p></div><div class="historical-risk {item.riskLevel}"><strong>{Math.round(item.probability * 100)}%</strong><span>{item.riskLevel}</span></div></article>{/each}</div>{/if}
+					{#if recentHistory.length}<HistoryTrend items={recentHistory.slice(0, 10)}/><details class="recent-history glass" bind:open={showRecentHistory}><summary>View the last {Math.min(10, recentHistory.length)} predictions for {selected.name}</summary><div class="history-list">{#each recentHistory.slice(0, 10) as item}<article class="history-result"><div><strong>{new Date(item.recordedAt).toLocaleString()}</strong><p>Target {item.targetDate}</p></div><div class="historical-risk {item.riskLevel}"><strong>{Math.round(item.probability * 100)}%</strong><span>{item.riskLevel}</span></div></article>{/each}</div></details>{/if}
 				<form class="history-form glass" on:submit|preventDefault={searchHistory}>
 					<label><span>Covered location</span><select bind:value={selected}>{#each locations as location}<option value={location}>{location.name}, {location.country}</option>{/each}</select></label>
 					<label><span>Date</span><input type="date" bind:value={searchDate} min={minDate} max={today}/></label>
@@ -562,19 +620,18 @@
 				</form>
 				<div class="coverage-note"><Info size={18}/><p><strong>Coverage status:</strong> Operational and provisional communities use centrally monitored forecast cells. Provisional coverage means local performance evaluation is still continuing.</p></div>
 				{#if historyMessage}<p class="history-message" role="status">{historyMessage}</p>{/if}
-				{#each history as item}
-					<article class="history-result glass"><div><p class="eyebrow">Recorded {new Date(item.recordedAt).toLocaleString()}</p><h2>{item.locationName}</h2><p>Prediction target: {item.targetDate}</p></div><div class="historical-risk {item.riskLevel}"><strong>{Math.round(item.probability * 100)}%</strong><span>{item.riskLevel}</span></div></article>
-				{/each}
+				{#if history.length}<HistoryTrend items={history.slice(0, 10)}/><details class="recent-history glass"><summary>View matching records</summary><div class="history-list">{#each history.slice(0, 10) as item}<article class="history-result"><div><p class="eyebrow">Recorded {new Date(item.recordedAt).toLocaleString()}</p><h2>{item.locationName}</h2><p>Prediction target: {item.targetDate}</p></div><div class="historical-risk {item.riskLevel}"><strong>{Math.round(item.probability * 100)}%</strong><span>{item.riskLevel}</span></div></article>{/each}</div></details>{/if}
 			</section>
 		{:else if activeTab === 'notifications'}
 			<section class="utility-page">
-				<div class="subpage-head"><div><p class="eyebrow">Broadcast centre</p><h1>Notifications & alerts</h1><p>Risk changes and high-confidence storm broadcasts appear here and as in-app banners.</p></div></div>
+					<div class="subpage-head"><div><p class="eyebrow">Regional awareness</p><h1>Dust alerts</h1><p>Only high-risk alerts are shown. Clear, watch and warning updates are excluded.</p></div></div>
 				{#if !linkedPhone}<div class="offline-callout glass"><Phone size={22}/><div><strong>Offline alerts are not active</strong><p>Link a phone number in Settings to receive SMS broadcasts when you do not have internet access.</p></div><button on:click={() => activeTab = 'settings'}>Link phone</button></div>{/if}
-				<div class="notification-list" aria-live="polite">
-					{#each (authState.authenticated ? userNotifications.map((n) => ({ timestamp: n.created_at, probability: n.probability, alertLevel: n.current_level, locationName: n.location_name, confidence: n.direction })) : activeAlerts.flatMap((a) => a.updates.map((u) => ({ ...u, locationName: a.locationName })))).sort((a,b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 20) as item}
-						<article class="notification glass"><span class="notification-mark {item.alertLevel}"><Bell size={18}/></span><div><strong>{item.locationName}: {item.alertLevel}</strong><p>{Math.round(item.probability * 100)}% chance of dusty conditions · {typeof item.confidence === 'number' ? `${item.confidence}% of recent weather readings received` : item.confidence}</p><small>{new Date(item.timestamp).toLocaleString()}</small></div></article>
-					{:else}<div class="empty glass"><Bell size={28}/><h2>No broadcasts yet</h2><p>New risk-level changes will be recorded here.</p></div>{/each}
-				</div>
+					<div class="alert-filter glass" role="group" aria-label="Alert area"><button class:active={alertScope === 'location'} on:click={() => alertScope='location'}>{selected.name}</button><button class:active={alertScope === 'neighbours'} on:click={() => alertScope='neighbours'}>Neighbouring countries</button><button class:active={alertScope === 'sahel'} on:click={() => alertScope='sahel'}>Sahel by country</button></div>
+					<div class="alert-list" aria-live="polite">
+						{#each scopedAlertItems as item}
+							<article class="alert-row glass"><span class="notification-mark alert"><Bell size={18}/></span><div><strong>{item.locationName}</strong><small>{new Date(item.timestamp).toLocaleString()}</small></div><b>{Math.round(item.probability * 100)}%</b></article>
+						{:else}<div class="empty glass"><Bell size={28}/><h2>No high-risk alerts</h2><p>No alert-level dust event is currently recorded for this selection.</p></div>{/each}
+					</div>
 			</section>
 		{:else}
 			<section class="utility-page settings-page">
@@ -590,7 +647,9 @@
 <style>
 	.modal-scrim{position:fixed;z-index:1200;inset:0;padding:20px;display:grid;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(12px)}.confirm-card{width:min(440px,100%);padding:28px;border:1px solid var(--border);border-radius:28px;color:var(--text);background:var(--surface-solid);box-shadow:var(--shadow-lg)}.confirm-icon{width:48px;height:48px;display:grid;place-items:center;border-radius:16px;color:var(--red);background:color-mix(in srgb,var(--red) 12%,transparent)}.confirm-icon.logout-icon{color:var(--blue);background:color-mix(in srgb,var(--blue) 12%,transparent)}.confirm-card h2{margin:18px 0 10px}.confirm-card p{color:var(--text-secondary);line-height:1.6}.confirm-card .delete-error{padding:10px 12px;border-radius:12px;color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent)}.confirm-card>div{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:10px}.confirm-card button{min-height:48px;border:0;border-radius:15px;font-weight:700;cursor:pointer}.delete-confirm{color:white;background:var(--red)}.logout-confirm{color:var(--on-brand);background:var(--blue)}
 	.critical-banner{position:sticky;z-index:40;top:8px;margin-bottom:8px;padding:12px 16px;display:flex;align-items:center;gap:10px;border-radius:16px;color:white;background:var(--red);box-shadow:var(--shadow-md)}.critical-banner button{margin-left:auto;min-height:44px;padding:0 14px;border:1px solid rgba(255,255,255,.45);border-radius:14px;color:white;background:rgba(255,255,255,.12);cursor:pointer}.threshold-field{margin-top:20px;display:grid;gap:8px;color:var(--text-secondary);font-size:.8rem;font-weight:600}.threshold-field select{min-height:48px;padding:0 14px;border:1px solid var(--border);border-radius:14px;color:var(--text);background:var(--surface-solid)}.map-loading{height:100%;display:grid;place-items:center;color:var(--text-secondary)}
-	.splash{position:fixed;z-index:1100;inset:0;display:grid;place-content:center;justify-items:center;background:linear-gradient(rgba(7,12,25,.44),rgba(8,13,27,.62)),url('/sahel-liquid-backdrop-v3.png') center/cover;color:white}.splash span{width:74px;height:74px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.55);border-radius:24px;color:var(--on-brand);background:linear-gradient(145deg,#759fc6,var(--brand-strong));box-shadow:0 22px 56px color-mix(in srgb,var(--blue) 38%,transparent),inset 0 1px rgba(255,255,255,.6)}.splash strong{margin-top:18px;font-size:1.55rem;letter-spacing:-.04em}.splash small{margin-top:6px;color:rgba(255,255,255,.72)}
+		.splash{position:fixed;z-index:1100;inset:0;display:grid;place-content:center;justify-items:center;background:linear-gradient(145deg,#172433,#0b1119);color:white}.splash span{width:74px;height:74px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.55);border-radius:24px;color:var(--on-brand);background:linear-gradient(145deg,#759fc6,var(--brand-strong));box-shadow:0 22px 56px color-mix(in srgb,var(--blue) 38%,transparent),inset 0 1px rgba(255,255,255,.6)}.splash strong{margin-top:18px;font-size:1.55rem;letter-spacing:-.04em}.splash small{margin-top:6px;color:rgba(255,255,255,.72)}
+		.drawer-scrim{position:fixed;z-index:1000;inset:0;background:rgba(3,8,14,.52);backdrop-filter:blur(8px)}.notification-drawer{position:absolute;top:12px;right:12px;width:min(430px,calc(100% - 24px));max-height:calc(100dvh - 24px);padding:22px;overflow:auto;border-radius:28px}.drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.drawer-head h2{margin:0;font-size:1.8rem}.drawer-head button{width:44px;height:44px;border:1px solid var(--border);border-radius:50%;background:var(--surface-muted);font-size:1.6rem;cursor:pointer}.activity-note{padding:16px 0;display:grid;grid-template-columns:42px 1fr;gap:12px;border-bottom:1px solid var(--border)}.activity-note>span{width:42px;height:42px;display:grid;place-items:center;border-radius:14px;color:var(--blue);background:color-mix(in srgb,var(--blue) 12%,transparent)}.activity-note p{margin:5px 0;color:var(--text-secondary);font-size:.84rem;line-height:1.5}.activity-note small{color:var(--text-tertiary)}.activity-note em{display:block;margin-top:10px;color:var(--text-secondary);font-size:.78rem;font-style:normal}.activity-actions{display:flex;gap:8px;margin-top:12px}.activity-actions button{min-height:40px;padding:0 14px;border:1px solid var(--border);border-radius:999px;background:var(--surface-muted);color:var(--text);font-weight:700;cursor:pointer}.activity-actions .danger{color:#d9363e}.drawer-empty{padding:40px 12px;text-align:center}.drawer-empty strong,.drawer-empty p{display:block}.drawer-empty p{margin:8px auto 0;max-width:310px;color:var(--text-secondary);line-height:1.5}
+		.alert-filter{width:max-content;max-width:100%;margin:0 0 18px;padding:4px;display:flex;gap:4px;border-radius:999px}.alert-filter button{min-height:40px;padding:0 14px;border:0;border-radius:999px;color:var(--text-secondary);background:transparent;font-weight:700;cursor:pointer}.alert-filter button.active{color:var(--text);background:var(--surface-solid);box-shadow:0 4px 16px rgba(0,0,0,.1)}.alert-list{display:grid;gap:8px}.alert-row{min-height:74px;padding:12px 16px;display:grid;grid-template-columns:42px 1fr auto;align-items:center;gap:12px;border-radius:18px}.alert-row strong,.alert-row small{display:block}.alert-row small{margin-top:4px;color:var(--text-secondary)}.alert-row>b{font-size:1.4rem;font-variant-numeric:tabular-nums}
 	.app-shell { width: min(1480px, calc(100% - 28px)); margin: 0 auto; padding: 14px 0 28px; }
 	.tabs { width: max-content; margin: 16px auto 0; padding: 5px; display: flex; gap: 3px; border-radius: var(--radius-pill); }
 	.tabs button { min-height: 42px; padding: 0 16px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: var(--radius-pill); color: var(--text-secondary); background: transparent; cursor: pointer; transition: var(--ease); }
@@ -637,12 +696,11 @@
 	.risk-orb span.unavailable-value { font-size: clamp(3.5rem, 7vw, 6rem); letter-spacing: 0; }
 	.metrics { margin-bottom: 68px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }.metrics article { min-height: 130px; padding: 20px; display: flex; align-items: flex-start; gap: 14px; border-radius: var(--radius-md); }.metric-icon { min-width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; color: var(--blue); background: color-mix(in srgb, var(--blue) 10%, transparent); }.metrics p,.metrics small { display: block; color: var(--text-secondary); }.metrics p { margin: 0 0 8px; font-size: .78rem; }.metrics strong { font-size: 1.12rem; }.metrics small { margin-top: 5px; font-size: .72rem; }
 	.explanation { margin: -42px 0 24px; padding: clamp(22px, 4vw, 38px); display: grid; grid-template-columns: auto 1fr; gap: 18px; border-radius: var(--radius-lg); }.explanation-icon { width: 50px; height: 50px; display: grid; place-items: center; border-radius: 17px; color: var(--blue); background: color-mix(in srgb,var(--blue) 11%,transparent); }.explanation h2 { margin-bottom: 10px; font-size: clamp(1.4rem,2.5vw,2.2rem); letter-spacing: -.035em; }.explanation p { margin-bottom: 10px; max-width: 850px; color: var(--text-secondary); line-height: 1.65; }.explanation small { color: var(--text-tertiary); }
-	.data-warning{margin:-42px 0 56px;padding:14px 16px;display:flex;align-items:flex-start;gap:10px;border:1px solid color-mix(in srgb,var(--orange) 35%,var(--border));border-radius:16px;color:var(--text-secondary);background:color-mix(in srgb,var(--orange) 8%,var(--surface))}.data-warning p{margin:0;font-size:.8rem;line-height:1.5}.data-warning svg{flex:none;color:var(--orange)}
 	.subpage-head h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); letter-spacing: -.045em; }
 	.forecast-strip { margin-bottom: 70px; padding: 18px 22px; display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); align-items: center; gap: 12px; border-radius: var(--radius-lg); }.forecast-strip strong,.forecast-strip small { display: block; }.forecast-strip small { margin-top: 5px; color: var(--text-secondary); font-size: .75rem; }.day { padding: 10px 18px; border-left: 1px solid var(--border); }.day span { color: var(--text-secondary); font-size: .78rem; }.day strong { margin-top: 7px; font-size: 1.55rem; font-variant-numeric: tabular-nums; }
 	.subpage-head { padding: 65px 8px 28px; display: flex; align-items: end; justify-content: space-between; gap: 20px; }.subpage-head p { margin: 10px 0 0; color: var(--text-secondary); }.subpage-head select,.history-form select,.history-form input { min-height: 48px; padding: 0 15px; border: 1px solid var(--border); border-radius: 15px; color: var(--text); background: var(--surface-solid); }
 	.tracking-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .65fr); gap: 14px; }.tracking-map { height: 680px; overflow: hidden; border-radius: var(--radius-xl); }.detail { padding: 26px; border-radius: var(--radius-xl); }.detail-top { display: flex; justify-content: space-between; align-items: center; }.detail-top small { color: var(--text-secondary); }.badge { padding: 7px 10px; border-radius: var(--radius-pill); font-size: .72rem; font-weight: 750; text-transform: uppercase; }.badge.clear { color: var(--green); background: color-mix(in srgb,var(--green) 12%,transparent); }.badge.watch { color: var(--yellow); background: color-mix(in srgb,var(--yellow) 12%,transparent); }.badge.warning { color: var(--orange); background: color-mix(in srgb,var(--orange) 12%,transparent); }.badge.alert { color: var(--red); background: color-mix(in srgb,var(--red) 12%,transparent); }.detail h2 { margin: 34px 0 8px; font-size: 3.3rem; letter-spacing: -.055em; }.detail > p { color: var(--text-secondary); line-height: 1.55; }.detail dl { margin: 30px 0; }.detail dl div { padding: 15px 0; display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); }.detail dt { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }.detail dd { margin: 0; text-align: right; font-weight: 600; }.notice,.coverage-note { padding: 14px; display: flex; align-items: flex-start; gap: 10px; border-radius: 16px; color: var(--text-secondary); background: var(--surface-muted); }.notice p,.coverage-note p { margin: 0; font-size: .78rem; line-height: 1.5; }
-	.history-page { width: min(980px, 100%); margin: auto; }.history-form { padding: 18px; display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; border-radius: var(--radius-lg); }.history-form label span { margin: 0 0 8px 3px; display: block; color: var(--text-secondary); font-size: .76rem; font-weight: 600; }.history-form select,.history-form input { width: 100%; }.coverage-note { margin: 14px 0 30px; }.history-message { color: var(--text-secondary); text-align: center; }.history-result { margin: 12px 0; padding: 22px; display: flex; align-items: center; justify-content: space-between; border-radius: var(--radius-lg); }.history-result h2 { margin-bottom: 5px; }.history-result p { margin-bottom: 0; color: var(--text-secondary); }.historical-risk { text-align: right; }.historical-risk strong,.historical-risk span { display: block; }.historical-risk strong { font-size: 2.5rem; }.historical-risk span { color: var(--text-secondary); text-transform: capitalize; }
+	.history-page { width: min(980px, 100%); margin: auto; }.history-form { padding: 18px; display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; border-radius: var(--radius-lg); }.history-form label span { margin: 0 0 8px 3px; display: block; color: var(--text-secondary); font-size: .76rem; font-weight: 600; }.history-form select,.history-form input { width: 100%; }.coverage-note { margin: 14px 0 30px; }.history-message { color: var(--text-secondary); text-align: center; }.recent-history{margin:12px 0;padding:0 18px;border-radius:20px}.recent-history summary{min-height:58px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-weight:750}.recent-history summary::after{content:'+';font-size:1.35rem}.recent-history[open] summary::after{content:'−'}.history-list{padding-bottom:10px;border-top:1px solid var(--border)}.history-result { margin:0; padding:16px 2px; display: flex; align-items: center; justify-content: space-between; border-bottom:1px solid var(--border); }.history-result:last-child{border-bottom:0}.history-result h2 { margin-bottom: 5px; }.history-result p { margin-bottom: 0; color: var(--text-secondary); }.historical-risk { text-align: right; }.historical-risk strong,.historical-risk span { display: block; }.historical-risk strong { font-size: 2rem; }.historical-risk span { color: var(--text-secondary); text-transform: capitalize; }
 		.utility-page { width: min(980px,100%); margin: auto; }.offline-callout { margin-bottom: 18px; padding: 18px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; border-radius: var(--radius-md); }.offline-callout > svg { color: var(--orange); }.offline-callout p { margin: 4px 0 0; color: var(--text-secondary); font-size: .82rem; }.offline-callout button { min-height: 44px; padding: 0 15px; border: 0; border-radius: var(--radius-pill); color: var(--on-brand); background: var(--blue); cursor: pointer; }.notification-list { display: grid; gap: 10px; }.notification { padding: 18px; display: flex; align-items: center; gap: 14px; border-radius: var(--radius-md); }.notification-mark { min-width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; }.notification-mark.clear { color: var(--green); background: color-mix(in srgb,var(--green) 12%,transparent); }.notification-mark.watch { color: var(--yellow); background: color-mix(in srgb,var(--yellow) 12%,transparent); }.notification-mark.warning { color: var(--orange); background: color-mix(in srgb,var(--orange) 12%,transparent); }.notification-mark.alert { color: var(--red); background: color-mix(in srgb,var(--red) 12%,transparent); }.notification p,.notification small { margin: 4px 0 0; color: var(--text-secondary); font-size: .78rem; }.empty { padding: 60px 20px; border-radius: var(--radius-lg); color: var(--text-secondary); text-align: center; }.empty h2 { margin: 12px 0 6px; color: var(--text); }.settings-card,.legal { padding: 24px; border-radius: var(--radius-lg); }.settings-title { display: flex; gap: 14px; }.settings-title > span { min-width: 44px; height: 44px; display: grid; place-items: center; border-radius: 15px; color: var(--blue); background: color-mix(in srgb,var(--blue) 11%,transparent); }.settings-title h2 { margin: 0; }.settings-title p { margin: 6px 0 0; color: var(--text-secondary); }.settings-card form { margin-top: 24px; }.settings-card label { display: block; margin: 0 0 8px; color: var(--text-secondary); font-size: .78rem; font-weight: 600; }.phone-field { min-height: 50px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-solid); overflow: hidden; }.phone-field > span { padding-left: 14px; color: var(--text-secondary); }.phone-field input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text); background: transparent; }.phone-field button { align-self: stretch; padding: 0 16px; display: flex; align-items:center;gap:7px;border:0;color:var(--on-brand);background:var(--blue);cursor:pointer}.form-message{margin:12px 0 0;color:var(--text-secondary);font-size:.8rem}.linked{margin-top:22px;padding:14px;display:flex;align-items:center;gap:10px;border-radius:16px;background:var(--surface-muted)}.linked svg{color:var(--green)}.linked .danger{margin-left:auto}.danger{border:0;color:var(--red);background:transparent;cursor:pointer}.legal{margin-top:12px;display:grid}.legal a,.reset-row,.danger-row{min-height:54px;padding:0 4px;display:flex;align-items:center;justify-content:space-between;border:0;border-bottom:1px solid var(--border);color:var(--text);background:transparent;cursor:pointer}.reset-copy{padding:20px 4px 8px}.reset-copy p{margin:5px 0 0;color:var(--text-secondary);font-size:.78rem;line-height:1.5}.reset-row,.danger-row{justify-content:flex-start;gap:9px}.reset-row{color:var(--blue)}.danger-row{color:var(--red);border-bottom:0}
 	.account-link,.account-switch{margin-top:20px}.account-switch{width:100%}
 	footer { margin-top: 80px; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-radius:22px; color: var(--text-secondary); font-size: .76rem; }footer span { color: var(--text); font-weight: 750; }footer p { margin: 0; }
@@ -669,7 +727,6 @@
 		.mobile-metrics span { grid-row:1 / 3; width:26px; height:26px; display:grid; place-items:center; color:var(--blue); }
 		.mobile-metrics small,.mobile-metrics strong { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }.mobile-metrics small { color:var(--text-secondary); font-size:.62rem; }.mobile-metrics strong { margin-top:2px; font-size:.78rem; font-variant-numeric:tabular-nums; }
 		.hero,.metrics { display:none; }
-		.data-warning { margin:0 0 14px; }
 		.explanation { margin:0 0 14px; }
 		.tracking-picker { margin-top:0; }
 		.offline-callout { grid-template-columns: auto 1fr; }.offline-callout button { grid-column: 1 / -1; }
@@ -678,7 +735,8 @@
 	.confirm-card label{display:block;margin:18px 0 8px;font-size:.8rem;font-weight:700}.delete-code{width:100%;min-height:52px;padding:0 14px;border:1px solid var(--border);border-radius:15px;color:var(--text);background:var(--surface-muted);font-size:1.35rem;letter-spacing:.25em;text-align:center}
 	.form-message{padding:12px 14px;display:flex;align-items:center;gap:9px;border:1px solid color-mix(in srgb,var(--green) 30%,var(--border));border-radius:14px;color:var(--text);background:color-mix(in srgb,var(--green) 10%,var(--surface));font-size:.82rem}.form-message svg{flex:none;color:var(--green)}
 	.form-message.error{border-color:color-mix(in srgb,var(--red) 35%,var(--border));background:color-mix(in srgb,var(--red) 10%,var(--surface))}.form-message.error svg{color:var(--red)}
-	.metrics small span{display:block;margin-top:4px;color:var(--text-tertiary)}
+		.metrics small span{display:block;margin-top:4px;color:var(--text-tertiary)}
+		.drawer-backdrop{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;cursor:default}
 	@media (prefers-reduced-motion: reduce) {
 		.loading-mark { animation: none; }
 	}

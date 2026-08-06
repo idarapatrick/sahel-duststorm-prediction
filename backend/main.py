@@ -19,7 +19,7 @@ from history_store import RETENTION_DAYS, database_status, query_latest_outlooks
 from evidence_store import query_snapshot_evidence, query_snapshots_evidence
 from monitoring_store import prediction_schedule
 from auth_store import AuthError, account_exists, confirm_account_deletion, normalize_phone, request_account_deletion_otp, request_otp as create_otp_challenge, require_session, revoke_session, session_user, verify_otp as consume_otp
-from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, upsert_subscription
+from alert_store import delete_subscription, list_subscriptions, notification_feed, operational_status, respond_to_account_notification, upsert_subscription
 from rate_limit import RateLimitExceeded, enforce_rate_limit
 from observability import configure_logging, log_event
 from coverage_store import coverage_status, list_covered_places, nearest_covered_place
@@ -231,7 +231,8 @@ async def auth_firebase_session(payload: FirebaseSessionRequest, request: Reques
         validate_sahel_point(location["lat"], location["lon"])
     try:
         result = create_firebase_session(
-            payload.id_token, payload.purpose, location, payload.device_id, _request_ip(request)
+            payload.id_token, payload.purpose, location, payload.device_id,
+            _request_ip(request), request.headers.get("user-agent"),
         )
     except AuthError as exc:
         raise _auth_error(exc) from exc
@@ -409,6 +410,24 @@ async def notifications(limit: int = 50, sahelwatch_session: str | None = Cookie
         return {"notifications": notification_feed(user["phone_uid"], limit)}
     except AuthError as exc:
         raise _auth_error(exc) from exc
+
+
+@app.post("/api/v1/notifications/{notification_id}/respond")
+async def respond_to_notification(
+    notification_id: str,
+    payload: dict[str, str],
+    sahelwatch_session: str | None = Cookie(default=None),
+):
+    """Confirm a recognised sign-in or revoke the session created by an unknown one."""
+    try:
+        user = require_session(sahelwatch_session)
+        return respond_to_account_notification(user["phone_uid"], notification_id, payload.get("action", ""))
+    except AuthError as exc:
+        raise _auth_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.get("/api/v1/conditions/current", response_model=CurrentConditionsResponse)

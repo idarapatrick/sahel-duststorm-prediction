@@ -6,6 +6,7 @@
 	import type { ConfirmationResult } from 'firebase/auth';
 	import { DEFAULT_LOCATION, SAHEL_BOUNDS } from '$lib/locations';
 	import type { Location } from '$lib/types';
+	import { PHONE_COUNTRIES, localToE164 } from '$lib/sahelCountries';
 
 	export let deviceId: string;
 	export let locations: Location[] = [DEFAULT_LOCATION];
@@ -18,12 +19,15 @@
 	let selected = initialLocation;
 	let purpose: 'signup' | 'login' = 'signup';
 	let phone = '';
+	let selectedCountry = PHONE_COUNTRIES.find((country) => country.code === 'NG') ?? PHONE_COUNTRIES[0];
+	let localPhone = '';
 	let code = '';
 	let challengeId = '';
 	let firebaseConfirmation: ConfirmationResult | null = null;
 	let busy = false;
 	let message = '';
 	let locationQuery = '';
+	$: phone = localToE164(localPhone, selectedCountry.dial);
 	$: phoneValid = /^\+[1-9][0-9]{9,14}$/.test(phone.trim());
 	$: filteredLocations = locations.filter((location) =>
 		`${location.name} ${location.country}`.toLowerCase().includes(locationQuery.trim().toLowerCase())
@@ -35,9 +39,17 @@
 	function chooseLocation() { step = 'phone-choice'; message = ''; }
 	function finish(phoneUid?: string) { dispatch('complete', { location: selected, phoneUid }); }
 
-	function useMyLocation() {
+	async function useMyLocation() {
 		message = '';
-		if (!navigator.geolocation) { message = 'Location access is not available in this browser. Pick a monitored community instead.'; return; }
+		if (!window.isSecureContext) { message = 'Location access requires a secure HTTPS connection. Open the deployed SahelWatch website instead of an embedded browser.'; return; }
+		if (!navigator.geolocation) { message = 'This browser does not provide location access. Pick a monitored community instead.'; return; }
+		if ('permissions' in navigator) {
+			const permission = await navigator.permissions.query({ name: 'geolocation' }).catch(() => null);
+			if (permission?.state === 'denied') {
+				message = 'Location is blocked for SahelWatch. Open your browser site settings, set Location to Allow, then return and try again.';
+				return;
+			}
+		}
 		busy = true;
 		navigator.geolocation.getCurrentPosition(async ({ coords }) => {
 			const { latitude: lat, longitude: lon } = coords;
@@ -47,7 +59,14 @@
 			try { selected = await getNearestCoveredLocation(lat, lon); message = `${selected.name} is the nearest monitored community.`; }
 			catch { selected = locations.reduce((best, item) => Math.hypot(item.lat-lat,item.lon-lon) < Math.hypot(best.lat-lat,best.lon-lon) ? item : best); message = `${selected.name} is the nearest available community.`; }
 			finally { busy = false; }
-		}, () => { busy = false; message = 'Location permission was not granted. Pick a monitored community instead.'; }, { enableHighAccuracy: false, timeout: 10000 });
+		}, (error) => {
+			busy = false;
+			message = error.code === error.PERMISSION_DENIED
+				? 'Location is blocked. On iPhone, open Settings, Privacy & Security, Location Services, then allow your browser. On Android, open Settings, Location, App permissions, then allow your browser.'
+				: error.code === error.POSITION_UNAVAILABLE
+					? 'Your device could not determine its position. Turn on Location Services and Wi-Fi or mobile data, then try again.'
+					: 'Location checking took too long. Move to an area with a clearer signal or choose a monitored community.';
+		}, { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
 	}
 
 	async function sendCode() {
@@ -120,7 +139,16 @@
 			<button class="back" aria-label="Back" on:click={() => { step='phone-choice'; message=''; }}><ArrowLeft size={19}/></button>
 			<p class="step">{purpose === 'signup' ? 'Create phone account' : 'Secure login'}</p><h1 id="onboarding-title">Enter your phone number</h1>
 			<p class="intro">Use international E.164 format beginning with +. Your number is verified securely before it is linked to SahelWatch.</p>
-			<label for="phone">International phone number</label><input id="phone" type="tel" autocomplete="tel" bind:value={phone} placeholder="+2348012345678" aria-describedby="phone-help" on:blur={() => { if (phone && !phoneValid) message='Use international format starting with +, for example +2348012345678.'; }} /><small id="phone-help" class="helper">Include +, country code and subscriber number. Do not start with a local 0.</small>
+			<label for="phone">Phone number</label>
+			<div class="phone-composer">
+				<label class="sr-only" for="phone-country">Country</label>
+				<select id="phone-country" bind:value={selectedCountry} aria-label="Phone country">
+					{#each PHONE_COUNTRIES as country}<option value={country}>{country.code} · {country.name} (+{country.dial})</option>{/each}
+				</select>
+				<span aria-hidden="true">+{selectedCountry.dial}</span>
+				<input id="phone" type="tel" inputmode="tel" autocomplete="tel-national" bind:value={localPhone} placeholder="Phone number" aria-describedby="phone-help" on:blur={() => { if (localPhone && !phoneValid) message='Enter the complete mobile number after the country code.'; }} />
+			</div>
+			<small id="phone-help" class="helper">Choose your country, then enter the mobile number. A leading local 0 is removed automatically.</small>
 			<div id="firebase-recaptcha" aria-label="Firebase security verification"></div>
 			{#if message}<p class="message error" role="alert">{message}</p>{/if}
 			<button class="primary" disabled={busy || !phoneValid} on:click={sendCode}>{busy ? 'Sending code…' : 'Send verification code'}<ArrowRight size={18}/></button>
@@ -143,10 +171,13 @@
 	.step{margin:38px 0 8px;color:var(--blue);font-size:.72rem;font-weight:750;text-transform:uppercase;letter-spacing:.08em}h1{margin:0;font-size:clamp(2rem,7vw,3.1rem);line-height:1.02;letter-spacing:-.055em}.intro{margin:16px 0 26px;color:var(--text-secondary);line-height:1.6}
 	label{display:block;margin:20px 0 8px;font-size:.78rem;font-weight:700}input{width:100%;min-height:52px;padding:0 15px;border:1px solid var(--glass-border);border-radius:16px;color:var(--text);background:color-mix(in srgb,var(--surface-solid) 64%,transparent);box-shadow:inset 0 1px rgba(255,255,255,.36);backdrop-filter:blur(18px);font-size:1rem}.otp{font-size:1.5rem;letter-spacing:.3em;text-align:center;font-variant-numeric:tabular-nums}
 	.helper{display:block;margin:7px 3px 0;color:var(--text-tertiary);font-size:.72rem;line-height:1.45}
+	.phone-composer{display:grid;grid-template-columns:minmax(118px,1.35fr) auto minmax(120px,1fr);align-items:center;border:1px solid var(--glass-border);border-radius:16px;background:color-mix(in srgb,var(--surface-solid) 78%,transparent);overflow:hidden}.phone-composer select,.phone-composer input{min-width:0;min-height:52px;border:0;border-radius:0;background:transparent;box-shadow:none}.phone-composer select{padding:0 8px;color:var(--text);color-scheme:light}.phone-composer select option{color:#17202b;background:#f8f5ed}.phone-composer select option:checked{color:#07111d;background:#d9e4ed}.phone-composer>span{padding-left:10px;color:var(--text-secondary);font-weight:700}.phone-composer input{padding-left:6px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+	:global(:root:not([data-theme='dark'])) .phone-composer{background:rgba(249,247,240,.97);border-color:rgba(91,82,67,.2);box-shadow:0 12px 30px rgba(58,50,38,.11),inset 0 1px rgba(255,255,255,1);backdrop-filter:blur(28px) saturate(135%);-webkit-backdrop-filter:blur(28px) saturate(135%)}
 	#firebase-recaptcha{min-height:78px;margin:14px 0 2px;display:flex;justify-content:center;overflow:hidden}
 	.coverage-state{min-height:82px;padding:16px;display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:16px;background:var(--surface-muted)}.coverage-state strong,.coverage-state small{display:block}.coverage-state small{margin-top:4px;color:var(--text-secondary);line-height:1.4}.coverage-state.error{border-color:color-mix(in srgb,var(--red) 35%,var(--border))}.coverage-state.error button{min-height:40px;margin-top:10px;padding:0 14px;color:var(--on-brand);background:var(--blue)}.spinner{width:22px;height:22px;flex:none;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 	.location-picker{border:1px solid var(--glass-border);border-radius:18px;background:color-mix(in srgb,var(--surface-solid) 56%,transparent);box-shadow:inset 0 1px rgba(255,255,255,.34);backdrop-filter:blur(22px) saturate(170%);overflow:hidden}.location-search{height:52px;padding:0 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--border);color:var(--text-tertiary)}.location-search input{min-height:0;padding:0;border:0;border-radius:0;outline:0;background:transparent;box-shadow:none;backdrop-filter:none}.location-list{max-height:min(280px,35vh);padding:7px;overflow-y:auto;overscroll-behavior:contain}.location-list button{width:100%;min-height:54px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;text-align:left;background:transparent}.location-list button.selected{color:var(--brand-strong);background:color-mix(in srgb,var(--blue) 13%,transparent)}.location-list strong,.location-list small{display:block}.location-list small{margin-top:3px;color:var(--text-secondary);font-size:.72rem}.location-list p{padding:14px;color:var(--text-secondary);font-size:.82rem}
 	button{min-height:48px;border:0;border-radius:16px;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.primary,.secondary,.locate,.text{width:100%;margin-top:12px}.primary{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--on-brand);background:linear-gradient(135deg,#739dc3,var(--brand-strong));box-shadow:0 12px 30px color-mix(in srgb,var(--blue) 30%,transparent),inset 0 1px rgba(255,255,255,.55)}.secondary,.locate{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--text);border:1px solid var(--glass-border);background:color-mix(in srgb,var(--surface-solid) 34%,transparent);box-shadow:inset 0 1px rgba(255,255,255,.3);backdrop-filter:blur(18px)}.locate{margin-bottom:18px}.text{color:var(--text-secondary);background:transparent}.back,.close{position:absolute;top:24px;width:44px;background:var(--surface-muted)}.back{right:24px}.close{right:24px}.benefit{padding:16px;display:flex;gap:12px;border:1px solid var(--glass-border);border-radius:18px;background:color-mix(in srgb,var(--surface-solid) 30%,transparent);backdrop-filter:blur(18px)}.benefit p{margin:5px 0 0;color:var(--text-secondary);font-size:.8rem;line-height:1.45}.message{margin:12px 0 0;color:var(--text-secondary);font-size:.82rem}.error{color:var(--red)}.privacy{margin:24px 0 0;color:var(--text-tertiary);font-size:.72rem;line-height:1.5}.privacy a{color:var(--brand-strong)}
 	@media(prefers-reduced-motion:no-preference){.sheet{animation:enter .25s ease-out}@keyframes enter{from{opacity:0;transform:translateY(14px) scale(.98)}}}
+	@media(max-width:440px){.phone-composer{grid-template-columns:1fr}.phone-composer select{border-bottom:1px solid var(--border)}.phone-composer>span{display:none}.phone-composer input{padding:0 14px}.phone-composer input::placeholder{color:var(--text-tertiary)}}
 	@media(max-width:380px){#firebase-recaptcha{margin-inline:-18px;transform:scale(.86)}}
 </style>

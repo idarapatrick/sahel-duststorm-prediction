@@ -1,12 +1,13 @@
 <script lang="ts">
-	import { Search, Moon, Sun, ChevronDown, Wind } from 'lucide-svelte';
+	import { Bell, Search, Moon, Sun, ChevronDown, Wind } from 'lucide-svelte';
 	import type { Location } from '$lib/types';
 	import { createEventDispatcher, onMount } from 'svelte';
 
 	export let selected: Location;
 	export let locations: Location[] = [];
 	export let online = true;
-	const dispatch = createEventDispatcher<{ select: Location; theme: 'light' | 'dark' }>();
+	export let unreadNotifications = 0;
+	const dispatch = createEventDispatcher<{ select: Location; theme: 'light' | 'dark'; notifications: void }>();
 	let query = '';
 	let dark = false;
 	let open = false;
@@ -54,6 +55,7 @@
 	<div class="actions">
 		<div class="status" title={online ? 'Live updates connected' : 'Live updates unavailable'}><i class:offline={!online}></i><span>{online ? 'Live updates' : 'Updates offline'}</span></div>
 		<button class="location" on:click={() => open = !open} aria-label={`Change forecast location. Current location: ${selected.name}`} aria-expanded={open} aria-haspopup="listbox"><span>{selected.name}</span><ChevronDown size={16} /></button>
+		<button class="icon notification-button" on:click={() => dispatch('notifications')} aria-label={`${unreadNotifications || 'No'} unread notifications`}><Bell size={20} />{#if unreadNotifications > 0}<span>{Math.min(unreadNotifications, 9)}{unreadNotifications > 9 ? '+' : ''}</span>{/if}</button>
 		<button class="icon" on:click={toggleTheme} aria-label={dark ? 'Use light theme' : 'Use dark theme'}>{#if dark}<Sun size={20} />{:else}<Moon size={20} />{/if}</button>
 	</div>
 </header>
@@ -70,6 +72,7 @@
 	.search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--ring); }
 	.search input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: .86rem; }
 	.results { position: absolute; top: 52px; width: 100%; max-height: min(420px, 65vh); padding: 8px; overflow-y: auto; overscroll-behavior: contain; border-radius: 20px; }
+	:global(:root:not([data-theme='dark'])) .results { background: rgba(248,246,239,.97); border-color: rgba(91,82,67,.2); box-shadow: 0 22px 55px rgba(58,50,38,.18), inset 0 1px rgba(255,255,255,.95); backdrop-filter: blur(32px) saturate(140%); -webkit-backdrop-filter: blur(32px) saturate(140%); }
 	.results button { width: 100%; min-height: 46px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; border: 0; border-radius: 13px; background: transparent; cursor: pointer; }
 	.results button:hover { background: var(--surface-muted); }
 	.results small, .results p { color: var(--text-secondary); }
@@ -81,6 +84,7 @@
 	.status i.offline { background: var(--orange); box-shadow: none; animation: none; }
 	.location { padding: 0 12px; cursor: pointer; }
 	.icon { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid color-mix(in srgb,var(--glass-border) 70%,transparent); border-radius: 50%; background:color-mix(in srgb,var(--surface-solid) 34%,transparent); box-shadow:inset 0 1px rgba(255,255,255,.32); backdrop-filter:blur(20px); cursor: pointer; }
+	.notification-button{position:relative}.notification-button span{position:absolute;top:-3px;right:-3px;min-width:19px;height:19px;padding:0 5px;display:grid;place-items:center;border:2px solid var(--surface-solid);border-radius:10px;color:white;background:var(--red);font-size:.62rem;font-weight:800}
 	@keyframes breathe { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--green) 2%, transparent); } }
 	@media (max-width: 820px) {
 		.header { min-height: 64px; grid-template-columns: 1fr auto; }

@@ -72,7 +72,9 @@ def create_firebase_session(
     preferred_location: dict[str, Any] | None,
     device_id: str | None,
     ip: str | None,
+    user_agent: str | None = None,
 ) -> dict[str, Any]:
+    """Verify Firebase identity, persist the app session and record account activity."""
     if purpose not in {"signup", "login"}:
         raise AuthError(400, "purpose must be signup or login")
     decoded = verify_firebase_token(id_token)
@@ -85,7 +87,8 @@ def create_firebase_session(
             (firebase_uid,),
         ).fetchone()
         by_phone = connection.execute(
-            """SELECT phone_uid,firebase_uid,account_status,deletion_scheduled_for
+            """SELECT phone_uid,firebase_uid,account_status,deletion_scheduled_for,
+                      preferred_location_name
                FROM alert_identities WHERE phone_uid=%s FOR UPDATE""",
             (phone_uid,),
         ).fetchone()
@@ -130,7 +133,49 @@ def create_firebase_session(
                VALUES (%s,%s,%s,%s)""",
             (_token_hash(token), phone_uid, hash_ip(ip), expires),
         )
+        device_label = _device_label(user_agent)
+        notification_type = "account.login" if exists else "account.created"
+        notification_title = "New sign-in" if exists else "Phone account linked"
+        forecast_area = location.get("name") or (
+            by_phone.get("preferred_location_name") if by_phone else None
+        )
+        connection.execute(
+            """INSERT INTO account_notifications
+               (phone_uid,event_type,title,message,device_label,location_name,
+                session_token_hash,metadata)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (
+                phone_uid,
+                notification_type,
+                notification_title,
+                (
+                    f"You recently signed in using {device_label}."
+                    if exists
+                    else "Your verified phone number was linked to SahelWatch."
+                ),
+                device_label,
+                forecast_area,
+                _token_hash(token),
+                json.dumps({"ip_hash": hash_ip(ip)}),
+            ),
+        )
     return {"token": token, "phone_uid": phone_uid, "firebase_uid": firebase_uid, "expires_at": expires}
+
+
+def _device_label(user_agent: str | None) -> str:
+    """Return a privacy-conscious device family label from the HTTP user agent."""
+    value = (user_agent or "").lower()
+    if "iphone" in value or "ipad" in value:
+        return "an Apple mobile device"
+    if "android" in value:
+        return "an Android device"
+    if "windows" in value:
+        return "a Windows computer"
+    if "macintosh" in value or "mac os" in value:
+        return "a Mac computer"
+    if "linux" in value:
+        return "a Linux computer"
+    return "a web browser"
 
 
 def _delete_firebase_user(firebase_uid: str) -> None:

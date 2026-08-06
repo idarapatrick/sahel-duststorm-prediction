@@ -20,6 +20,7 @@ backend/.env
 /skills-lock.json
 /CLAUDE.md
 /AGENTS.md
+/firebase-debug.log
 
 # Local planning and agent-context documents are not repository documentation.
 /FRONTEND_REBUILD.md

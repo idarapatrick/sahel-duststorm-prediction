@@ -1,12 +1,12 @@
 :root {
 	color-scheme: light;
-	--bg: #dce3ea;
-	--bg-elevated: rgba(244, 248, 252, 0.82);
-	--surface: rgba(232, 239, 246, 0.62);
-	--surface-solid: rgba(249, 251, 253, 0.9);
+	--bg: #eeeae0;
+	--bg-elevated: rgba(248, 246, 239, 0.86);
+	--surface: rgba(240, 236, 226, 0.68);
+	--surface-solid: rgba(250, 248, 242, 0.92);
 	--surface-muted: rgba(41, 58, 76, 0.11);
 	--border: rgba(26, 42, 58, 0.18);
-	--glass-border: rgba(255, 255, 255, 0.82);
+	--glass-border: rgba(255, 253, 247, 0.86);
 	--text: #15202b;
 	--text-secondary: #39495a;
 	--text-tertiary: #5b6b7b;

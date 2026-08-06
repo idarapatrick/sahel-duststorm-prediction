@@ -7,18 +7,11 @@ body {
 	min-width: 320px;
 	min-height: 100dvh;
 	color: var(--text);
-	background:
-		linear-gradient(rgba(94,113,164,.08), rgba(72,91,143,.18)),
-		url('/sahel-liquid-backdrop-v3.png') center / cover fixed,
-		var(--bg);
-	background-attachment: fixed;
+	background:linear-gradient(145deg,#e9e4d8 0%,#f5f2ea 46%,#e7e1d4 100%);
 	transition: color var(--ease), background var(--ease);
 }
 :root[data-theme='dark'] body {
-	background:
-		linear-gradient(rgba(7,12,25,.62), rgba(8,13,27,.75)),
-		url('/sahel-liquid-backdrop-v3.png') center / cover fixed,
-		var(--bg);
+	background:linear-gradient(145deg,#0a0d12 0%,#111722 48%,#080b10 100%);
 }
 button, input, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
@@ -30,7 +23,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .glass {
 	background:
 		radial-gradient(ellipse at 12% -8%, rgba(255,255,255,.72), transparent 43%),
-		radial-gradient(ellipse at 92% 115%, rgba(125,166,204,.16), transparent 48%),
+		radial-gradient(ellipse at 92% 115%, rgba(177,158,122,.15), transparent 48%),
 		linear-gradient(145deg, rgba(255,255,255,.28), rgba(255,255,255,.06) 50%, transparent 76%),
 		var(--surface);
 	border: 1px solid var(--glass-border);
@@ -56,16 +49,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 @media (max-width: 720px) {
 	body {
-		background:
-			linear-gradient(rgba(94,113,164,.12), rgba(72,91,143,.24)),
-			url('/sahel-liquid-backdrop-v3.png') center / cover fixed,
-			var(--bg);
+		background:linear-gradient(155deg,#ebe6dc 0%,#f7f4ed 52%,#e6e0d4 100%);
 	}
 	:root[data-theme='dark'] body {
-		background:
-			linear-gradient(rgba(7,12,25,.66), rgba(8,13,27,.8)),
-			url('/sahel-liquid-backdrop-v3.png') center / cover fixed,
-			var(--bg);
+		background:linear-gradient(155deg,#090c11 0%,#121822 52%,#080a0e 100%);
 	}
 	.glass {
 		background:

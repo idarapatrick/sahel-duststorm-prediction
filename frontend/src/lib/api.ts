@@ -128,6 +128,10 @@ export async function getNotifications() {
 	return d.notifications;
 }
 
+export async function respondToAccountNotification(notificationId: string, action: 'confirm' | 'report') {
+	return postJson(`/api/v1/notifications/${notificationId}/respond`, { action });
+}
+
 export async function getLatestPrediction(location: Location): Promise<Prediction> {
 	const point = forecastCoordinates(location);
 	const d = await getJson(`/api/v1/predictions/latest?lat=${point.lat}&lon=${point.lon}`, 9_500);
